@@ -1,0 +1,17 @@
+{
+  "name": "tubeload-qa-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "TubeLoad QA Desktop App",
+  "author": "TubeLoad QA",
+  "license": "MIT",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^31.3.0",
+    "electron-builder": "^24.13.3"
+  }
+}
