@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>TubeLoad QA Android</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      background: #000;
+      overflow: hidden;
+    }
+
+    #container, #player {
+      width: 100%;
+      height: 100%;
+    }
+  </style>
+</head>
+<body>
+  <div id="container"></div>
+
+  <script>
+    var player = null;
+    var metricsTimer = null;
+    var humanTimer = null;
+    var repeating = false;
+
+    var cfg = null;
+    var kind = null;
+    var videoId = null;
+    var playlistId = null;
+
+    var ytApiReady = false;
+    var pendingStart = null;
+
+    var qualityMap = {
+      auto: "default",
+      "144p": "tiny",
+      "240p": "small",
+      "360p": "medium",
+      "480p": "large",
+      "720p": "hd720",
+      "1080p": "hd1080",
+      "1440p": "hd1440",
+      "2160p": "hd2160"
+    };
+
+    function log(obj) {
+      obj.ts = Date.now();
+
+      try {
+        if (window.Android && window.Android.log) {
+          Android.log(JSON.stringify(obj));
+        } else {
+          console.log(JSON.stringify(obj));
+        }
+      } catch (e) {
+        console.log("log error", e);
+      }
+    }
+
+    function parseYouTubeUrl(raw) {
+      try {
+        var u = new URL(raw);
+
+        var v = u.searchParams.get("v");
+        var list = u.searchParams.get("list");
+
+        if (v) {
+          return {
+            kind: list ? "playlist" : "video",
+            videoId: v,
+            playlistId: list || null
+          };
+        }
+
+        if (u.hostname === "youtu.be") {
+          var idShort = u.pathname.slice(1).split("/")[0];
+          if (idShort) {
+            return {
+              kind: "video",
+              videoId: idShort,
+              playlistId: null
+            };
+          }
+        }
+
+        if (u.pathname.indexOf("/playlist") === 0 && list) {
+          return {
+            kind: "playlist",
+            videoId: null,
+            playlistId: list
+          };
+        }
+
+        var ch = u.pathname.match(/\/channel\/(UC[0-9A-Za-z_-]{22})/);
+        if (ch) {
+          var channelId = ch[1];
+          var uploads = "UU" + channelId.slice(2);
+
+          return {
+            kind: "playlist",
+            videoId: null,
+            playlistId: uploads
+          };
+        }
+
+        if (u.pathname.indexOf("/shorts/") === 0) {
+          var shortsId = u.pathname.split("/")[2];
+          if (shortsId) {
+            return {
+              kind: "video",
+              videoId: shortsId,
+              playlistId: null
+            };
+          }
+        }
+
+        if (u.pathname.indexOf("/embed/") === 0) {
+          var embedId = u.pathname.split("/")[2];
+          if (embedId) {
+            return {
+              kind: "video",
+              videoId: embedId,
+              playlistId: null
+            };
+          }
+        }
+      } catch (e) {
+        log({
+          state: "error",
+          error: "invalid_url",
+          detail: String(e)
+        });
+      }
+
+      return null;
+    }
+
+    function stateName(state) {
+      if (!window.YT) return String(state);
+
+      switch (state) {
+        case YT.PlayerState.UNSTARTED:
+          return "unstarted";
+        case YT.PlayerState.ENDED:
+          return "ended";
+        case YT.PlayerState.PLAYING:
+          return "playing";
+        case YT.PlayerState.PAUSED:
+          return "paused";
+        case YT.PlayerState.BUFFERING:
+          return "buffering";
+        case YT.PlayerState.CUED:
+          return "cued";
+        default:
+          return String(state);
+      }
+    }
+
+    function applyQuality() {
+      if (!player || !cfg || cfg.quality === "auto") return;
+
+      var code = qualityMap[cfg.quality] || cfg.quality;
+
+      try {
+        if (player.setPlaybackQualityRange) {
+          player.setPlaybackQualityRange(code, code);
+        }
+      } catch (e) {}
+
+      try {
+        player.setPlaybackQuality(code);
+      } catch (e) {}
+    }
+
+    function startMetricsLoop() {
+      if (metricsTimer) clearInterval(metricsTimer);
+
+      metricsTimer = setInterval(function () {
+        if (!player) return;
+
+        try {
+          log({
+            state: stateName(player.getPlayerState()),
+            currentTime: player.getCurrentTime(),
+            duration: player.getDuration(),
+            loadedFraction: player.getVideoLoadedFraction(),
+            quality: player.getPlaybackQuality(),
+            kind: kind,
+            videoId: videoId,
+            playlistId: playlistId
+          });
+        } catch (e) {
+          log({
+            state: "error",
+            error: String(e)
+          });
+        }
+      }, 1000);
+    }
+
+    function humanLoop() {
+      if (!cfg || !cfg.humanize) return;
+
+      var delay = 15000 + Math.random() * 35000;
+
+      humanTimer = setTimeout(function () {
+        try {
+          if (player && player.getPlayerState() === YT.PlayerState.PLAYING) {
+            var r = Math.random();
+
+            if (r < 0.2) {
+              player.pauseVideo();
+
+              setTimeout(function () {
+                try {
+                  if (player) player.playVideo();
+                } catch (e) {}
+              }, 2000 + Math.random() * 7000);
+            } else if (r < 0.6) {
+              var t1 = player.getCurrentTime();
+              var d1 = 5 + Math.random() * 40;
+              var dur1 = player.getDuration() || t1 + d1 + 1;
+
+              player.seekTo(
+                Math.min(Math.max(0, t1 + d1), Math.max(0, dur1 - 1)),
+                true
+              );
+            } else if (r < 0.85) {
+              var t2 = player.getCurrentTime();
+              var d2 = 5 + Math.random() * 25;
+
+              player.seekTo(Math.max(0, t2 - d2), true);
+            }
+          }
+        } catch (e) {
+          log({
+            state: "error",
+            error: String(e)
+          });
+        }
+
+        humanLoop();
+      }, delay);
+    }
+
+    function scheduleRepeat() {
+      if (!cfg || !cfg.repeat || repeating) return;
+
+      repeating = true;
+
+      setTimeout(function () {
+        try {
+          if (!player) {
+            repeating = false;
+            return;
+          }
+
+          if (kind === "playlist") {
+            player.loadPlaylist({
+              listType: "playlist",
+              list: playlistId,
+              index: 0
+            });
+
+            player.playVideo();
+          } else {
+            player.seekTo(0, true);
+            player.playVideo();
+          }
+        } catch (e) {
+          log({
+            state: "error",
+            error: String(e)
+          });
+        }
+
+        repeating = false;
+      }, 1500 + Math.random() * 2500);
+    }
+
+    function cleanup() {
+      try {
+        if (metricsTimer) clearInterval(metricsTimer);
+        if (humanTimer) clearTimeout(humanTimer);
+        if (player && player.destroy) player.destroy();
+      } catch (e) {}
+
+      metricsTimer = null;
+      humanTimer = null;
+      player = null;
+      repeating = false;
+    }
+
+    window.stopPlayback = function () {
+      cleanup();
+      log({ state: "stopped" });
+    };
+
+    function createPlayer(config) {
+      cleanup();
+
+      cfg = config;
+
+      var parsed = parseYouTubeUrl(config.url);
+
+      if (!parsed) {
+        log({
+          state: "error",
+          error: "unsupported_url",
+          hint: "Android-Fallback unterstützt Video-, Playlist- und channel/UC...-URLs."
+        });
+        return;
+      }
+
+      kind = parsed.kind;
+      videoId = parsed.videoId;
+      playlistId = parsed.playlistId;
+
+      document.getElementById("container").innerHTML = '<div id="player"></div>';
+
+      var commonVars = {
+        autoplay: 1,
+        controls: 0,
+        disablekb: 1,
+        modestbranding: 1,
+        playsinline: 1,
+        rel: 0,
+        fs: 0,
+        iv_load_policy: 3,
+        enablejsapi: 1
+      };
+
+      var options = {
+        events: {
+          onReady: function (e) {
+            log({
+              state: "ready",
+              kind: kind,
+              videoId: videoId,
+              playlistId: playlistId
+            });
+
+            if (config.mute) {
+              try {
+                e.target.mute();
+              } catch (err) {}
+            }
+
+            applyQuality();
+
+            try {
+              e.target.playVideo();
+            } catch (err) {}
+
+            startMetricsLoop();
+            humanLoop();
+          },
+
+          onStateChange: function (e) {
+            var st = stateName(e.data);
+
+            log({
+              state: st,
+              kind: kind,
+              videoId: videoId,
+              playlistId: playlistId
+            });
+
+            if (e.data === YT.PlayerState.ENDED) {
+              scheduleRepeat();
+            }
+          },
+
+          onPlaybackQualityChange: function (e) {
+            log({
+              state: "quality_change",
+              quality: e.data
+            });
+          },
+
+          onVideoDataAvailable: function () {
+            applyQuality();
+          },
+
+          onError: function (e) {
+            log({
+              state: "error",
+              error: e.data
+            });
+          }
+        }
+      };
+
+      if (kind === "playlist") {
+        options.playerVars = {
+          autoplay: commonVars.autoplay,
+          controls: commonVars.controls,
+          disablekb: commonVars.disablekb,
+          modestbranding: commonVars.modestbranding,
+          playsinline: commonVars.playsinline,
+          rel: commonVars.rel,
+          fs: commonVars.fs,
+          iv_load_policy: commonVars.iv_load_policy,
+          enablejsapi: commonVars.enablejsapi,
+          listType: "playlist",
+          list: playlistId
+        };
+
+        player = new YT.Player("player", options);
+      } else {
+        options.videoId = videoId;
+        options.playerVars = commonVars;
+
+        player = new YT.Player("player", options);
+      }
+    }
+
+    window.startTest = function (config) {
+      if (!ytApiReady) {
+        pendingStart = config;
+        return;
+      }
+
+      createPlayer(config);
+    };
+
+    window.onYouTubeIframeAPIReady = function () {
+      ytApiReady = true;
+
+      if (pendingStart) {
+        createPlayer(pendingStart);
+        pendingStart = null;
+      }
+    };
+  </script>
+
+  <script src="https://www.youtube.com/iframe_api"></script>
+</body>
+</html>
