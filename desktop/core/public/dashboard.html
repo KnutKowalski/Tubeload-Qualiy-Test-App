@@ -1,0 +1,533 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TubeLoad QA</title>
+  <style>
+    :root {
+      color-scheme: dark;
+    }
+
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      margin: 16px;
+      background: #111;
+      color: #eee;
+    }
+
+    h1, h2, h3 {
+      margin: 10px 0;
+    }
+
+    input, select, button, textarea {
+      padding: 7px 9px;
+      margin: 3px;
+      background: #1d1d1d;
+      color: #eee;
+      border: 1px solid #333;
+      border-radius: 6px;
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: #282828;
+    }
+
+    .row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 10px;
+      margin: 12px 0;
+    }
+
+    .card {
+      background: #181818;
+      border: 1px solid #333;
+      padding: 10px 12px;
+      border-radius: 10px;
+    }
+
+    .card b {
+      font-size: 20px;
+    }
+
+    canvas {
+      background: #151515;
+      border: 1px solid #333;
+      width: 100%;
+      height: 180px;
+      border-radius: 10px;
+      margin: 10px 0;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 8px;
+      font-size: 13px;
+    }
+
+    th, td {
+      border-bottom: 1px solid #2a2a2a;
+      padding: 6px 8px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      color: #aaa;
+      font-weight: 600;
+    }
+
+    .muted {
+      color: #888;
+    }
+
+    #msg {
+      min-height: 1.2em;
+      color: #8ff;
+      margin: 6px 0;
+    }
+
+    .danger {
+      color: #f88;
+    }
+  </style>
+</head>
+<body>
+  <h1>TubeLoad QA</h1>
+  <div class="muted">
+    Netzwerk-/Streaming-Qualitätstest mit Playwright-Chromium. Nur für legitime QA-Zwecke verwenden.
+  </div>
+
+  <h2>Session starten</h2>
+
+  <form id="sessionForm" class="row">
+    <input
+      name="url"
+      placeholder="YouTube Video-, Playlist- oder Kanal-URL"
+      size="78"
+      required
+    />
+
+    <select name="kind">
+      <option value="auto">auto erkennen</option>
+      <option value="video">Video</option>
+      <option value="playlist">Playlist</option>
+      <option value="channel">Kanal</option>
+    </select>
+
+    <select name="quality">
+      <option value="auto">auto</option>
+      <option value="480p">480p</option>
+      <option value="720p">720p</option>
+      <option value="1080p">1080p</option>
+      <option value="1440p">1440p</option>
+      <option value="2160p">2160p</option>
+    </select>
+
+    <input name="minutes" type="number" min="1" placeholder="Minuten" style="width:110px" />
+
+    <label><input type="checkbox" name="humanize" checked /> Human</label>
+    <label><input type="checkbox" name="repeat" checked /> Repeat</label>
+
+    <button>Start</button>
+    <button type="button" onclick="location.href='/export/samples.csv'">Samples CSV</button>
+    <button type="button" onclick="location.href='/export/summaries.csv'">Summaries CSV</button>
+  </form>
+
+  <div id="msg"></div>
+
+  <div class="grid">
+    <div class="card">
+      Gesamt-Bandbreite<br />
+      <b id="totalBw">0.00 MB/s</b>
+    </div>
+
+    <div class="card">
+      CPU Browser<br />
+      <b id="cpu">0 %</b>
+    </div>
+
+    <div class="card">
+      RAM Browser<br />
+      <b id="ram">0 MB</b>
+    </div>
+
+    <div class="card">
+      Aktive Sessions<br />
+      <b id="activeCount">0</b>
+    </div>
+  </div>
+
+  <canvas id="chart" width="1200" height="180"></canvas>
+
+  <h2>Aktive Sessions</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Typ</th>
+        <th>State</th>
+        <th>Quality</th>
+        <th>MB/s</th>
+        <th>Buffer</th>
+        <th>Stalls</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody id="sessionsBody"></tbody>
+  </table>
+
+  <h2>Session-Zusammenfassungen</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Laufzeit</th>
+        <th>Ø MB/s</th>
+        <th>Peak MB/s</th>
+        <th>P95 MB/s</th>
+        <th>Stalls</th>
+        <th>Stall s</th>
+        <th>Quality</th>
+        <th>Drop %</th>
+      </tr>
+    </thead>
+    <tbody id="summariesBody"></tbody>
+  </table>
+
+  <h2>Scheduler</h2>
+
+  <form id="scheduleForm" class="row">
+    <input name="cron" placeholder="Cron, z. B. 0 2 * * *" required />
+    <input name="url" placeholder="URL" size="55" required />
+    <select name="quality">
+      <option value="auto">auto</option>
+      <option value="480p">480p</option>
+      <option value="720p">720p</option>
+      <option value="1080p">1080p</option>
+      <option value="1440p">1440p</option>
+      <option value="2160p">2160p</option>
+    </select>
+    <input name="minutes" type="number" min="1" placeholder="Minuten" style="width:110px" />
+    <label><input type="checkbox" name="humanize" checked /> Human</label>
+    <label><input type="checkbox" name="repeat" checked /> Repeat</label>
+    <button>Plan hinzufügen</button>
+  </form>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Cron</th>
+        <th>URL</th>
+        <th>Nächster Lauf</th>
+        <th>Letzter Lauf</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody id="schedulesBody"></tbody>
+  </table>
+
+  <script>
+    const API = "";
+    const ws = new WebSocket(`ws://${location.host}/ws`);
+
+    const latest = new Map();
+    const sessions = new Map();
+    const summaries = new Map();
+    const schedules = new Map();
+
+    const history = [];
+    const MAX_HISTORY = 300;
+
+    const msgEl = document.getElementById("msg");
+    const totalBwEl = document.getElementById("totalBw");
+    const cpuEl = document.getElementById("cpu");
+    const ramEl = document.getElementById("ram");
+    const activeCountEl = document.getElementById("activeCount");
+
+    const sessionsBody = document.getElementById("sessionsBody");
+    const summariesBody = document.getElementById("summariesBody");
+    const schedulesBody = document.getElementById("schedulesBody");
+
+    const chart = document.getElementById("chart");
+    const ctx = chart.getContext("2d");
+
+    ws.onmessage = (ev) => {
+      const msg = JSON.parse(ev.data);
+
+      if (msg.type === "sample") {
+        handleSample(msg.data);
+      } else if (msg.type === "summary") {
+        summaries.set(msg.data.sessionId, msg.data);
+        renderSummaries();
+      } else if (msg.type === "status") {
+        if (msg.data.state === "stopped") {
+          sessions.delete(msg.data.sessionId);
+          latest.delete(msg.data.sessionId);
+          renderSessions();
+        }
+      }
+    };
+
+    document.getElementById("sessionForm").onsubmit = async (e) => {
+      e.preventDefault();
+
+      const fd = new FormData(e.currentTarget);
+      const minutes = fd.get("minutes");
+
+      const body = {
+        url: fd.get("url"),
+        kind: fd.get("kind"),
+        quality: fd.get("quality"),
+        humanize: fd.get("humanize") === "on",
+        repeat: fd.get("repeat") === "on",
+        maxRuntimeSec: minutes ? Number(minutes) * 60 : undefined,
+      };
+
+      const r = await fetch(API + "/api/sessions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      const j = await r.json();
+      msgEl.textContent = j.ok
+        ? `Session gestartet: ${j.id} (${j.kind})`
+        : `Fehler: ${j.error}`;
+
+      if (j.ok) {
+        sessions.set(j.id, { sessionId: j.id, state: "starting" });
+        renderSessions();
+      }
+    };
+
+    document.getElementById("scheduleForm").onsubmit = async (e) => {
+      e.preventDefault();
+
+      const fd = new FormData(e.currentTarget);
+      const minutes = fd.get("minutes");
+
+      const body = {
+        cron: fd.get("cron"),
+        enabled: true,
+        session: {
+          url: fd.get("url"),
+          quality: fd.get("quality"),
+          humanize: fd.get("humanize") === "on",
+          repeat: fd.get("repeat") === "on",
+          maxRuntimeSec: minutes ? Number(minutes) * 60 : undefined,
+        },
+      };
+
+      const r = await fetch(API + "/api/schedules", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      const j = await r.json();
+      msgEl.textContent = j.ok
+        ? `Schedule hinzugefügt: ${j.schedule.id}`
+        : `Fehler: ${j.error}`;
+
+      if (j.ok) {
+        schedules.set(j.schedule.id, j.schedule);
+        renderSchedules();
+      }
+    };
+
+    function handleSample(s) {
+      latest.set(s.sessionId, s);
+      sessions.set(s.sessionId, s);
+
+      const totalBw = [...latest.values()].reduce((sum, x) => sum + x.bandwidthMBps, 0);
+      const last = [...latest.values()].at(-1);
+
+      totalBwEl.textContent = totalBw.toFixed(2) + " MB/s";
+      cpuEl.textContent = (last?.cpuPercent ?? 0).toFixed(1) + " %";
+      ramEl.textContent = (last?.ramMb ?? 0).toFixed(0) + " MB";
+      activeCountEl.textContent = String(latest.size);
+
+      history.push(totalBw);
+      if (history.length > MAX_HISTORY) history.shift();
+
+      drawChart();
+      renderSessions();
+    }
+
+    function drawChart() {
+      ctx.clearRect(0, 0, chart.width, chart.height);
+
+      if (history.length < 2) return;
+
+      const max = Math.max(1, ...history);
+
+      ctx.strokeStyle = "#4af";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+
+      history.forEach((v, i) => {
+        const x = (i / (history.length - 1)) * chart.width;
+        const y = chart.height - (v / max) * (chart.height - 12) - 6;
+
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+
+      ctx.stroke();
+
+      ctx.fillStyle = "#aaa";
+      ctx.font = "12px system-ui";
+      ctx.fillText(`max ${max.toFixed(2)} MB/s`, 8, 16);
+    }
+
+    function renderSessions() {
+      sessionsBody.innerHTML = "";
+
+      for (const s of sessions.values()) {
+        const tr = document.createElement("tr");
+
+        tr.innerHTML = `
+          <td title="${escapeHtml(s.sessionId)}">${escapeHtml(shortId(s.sessionId))}</td>
+          <td>${escapeHtml(s.kind ?? "")}</td>
+          <td>${escapeHtml(s.state ?? "")}</td>
+          <td>${escapeHtml(s.quality ?? "")}</td>
+          <td>${(s.bandwidthMBps ?? 0).toFixed(2)}</td>
+          <td>${(s.bufferedSec ?? 0).toFixed(1)}s</td>
+          <td>${s.stalls ?? 0}</td>
+          <td><button data-stop="${escapeHtml(s.sessionId)}">Stop</button></td>
+        `;
+
+        sessionsBody.appendChild(tr);
+      }
+
+      sessionsBody.querySelectorAll("button[data-stop]").forEach((btn) => {
+        btn.onclick = () => stopSession(btn.getAttribute("data-stop"));
+      });
+    }
+
+    function renderSummaries() {
+      summariesBody.innerHTML = "";
+
+      for (const s of [...summaries.values()].reverse()) {
+        const tr = document.createElement("tr");
+
+        tr.innerHTML = `
+          <td title="${escapeHtml(s.sessionId)}">${escapeHtml(shortId(s.sessionId))}</td>
+          <td>${formatDuration(s.runtimeSec)}</td>
+          <td>${s.avgBandwidthMBps.toFixed(2)}</td>
+          <td>${s.peakBandwidthMBps.toFixed(2)}</td>
+          <td>${s.p95BandwidthMBps.toFixed(2)}</td>
+          <td>${s.stalls}</td>
+          <td>${s.stallSeconds.toFixed(1)}</td>
+          <td>${escapeHtml(s.dominantQuality)}</td>
+          <td>${(s.droppedFrameRatio * 100).toFixed(2)}%</td>
+        `;
+
+        summariesBody.appendChild(tr);
+      }
+    }
+
+    function renderSchedules() {
+      schedulesBody.innerHTML = "";
+
+      for (const s of schedules.values()) {
+        const tr = document.createElement("tr");
+
+        tr.innerHTML = `
+          <td>${escapeHtml(s.cron)}</td>
+          <td>${escapeHtml(s.session.url)}</td>
+          <td>${s.nextRun ? new Date(s.nextRun).toLocaleString() : "-"}</td>
+          <td>${s.lastRun ? new Date(s.lastRun).toLocaleString() : "-"}</td>
+          <td><button data-del="${escapeHtml(s.id)}">Löschen</button></td>
+        `;
+
+        schedulesBody.appendChild(tr);
+      }
+
+      schedulesBody.querySelectorAll("button[data-del]").forEach((btn) => {
+        btn.onclick = () => deleteSchedule(btn.getAttribute("data-del"));
+      });
+    }
+
+    async function stopSession(id) {
+      await fetch(`${API}/api/sessions/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      });
+
+      msgEl.textContent = "Session gestoppt: " + id;
+    }
+
+    async function deleteSchedule(id) {
+      await fetch(`${API}/api/schedules/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      });
+
+      schedules.delete(id);
+      renderSchedules();
+    }
+
+    async function loadInitial() {
+      try {
+        const [sumRes, schRes] = await Promise.all([
+          fetch(API + "/api/summaries"),
+          fetch(API + "/api/schedules"),
+        ]);
+
+        const sumJson = await sumRes.json();
+        const schJson = await schRes.json();
+
+        for (const s of sumJson.summaries ?? []) {
+          summaries.set(s.sessionId, s);
+        }
+
+        for (const s of schJson.schedules ?? []) {
+          schedules.set(s.id, s);
+        }
+
+        renderSummaries();
+        renderSchedules();
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    function shortId(id) {
+      return String(id).slice(0, 8);
+    }
+
+    function formatDuration(sec) {
+      const s = Math.max(0, Math.floor(sec));
+      const h = Math.floor(s / 3600);
+      const m = Math.floor((s % 3600) / 60);
+      const ss = s % 60;
+      return `${h}:${String(m).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
+    }
+
+    function escapeHtml(v) {
+      return String(v ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    loadInitial();
+  </script>
+</body>
+</html>
