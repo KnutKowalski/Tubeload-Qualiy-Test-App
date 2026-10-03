@@ -5,7 +5,7 @@
   "description": "TubeLoad QA Desktop App",
   "author": {
     "name": "TubeLoad QA",
-    "email": "deine-adresse@beispiel.de"
+    "email": "knutkowalski@hotmail.de"
   },
   "homepage": "https://github.com/KnutKowalski/Tubeload-Qualiy-Test-App",  "license": "MIT",
   "main": "electron/main.js",
