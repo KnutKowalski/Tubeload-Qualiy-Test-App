@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "cron-parser": "^4.9.0",
-    "pidusage": "^2.0.5",
+    "pidusage": "^3.0.2",
     "playwright-core": "^1.50.0",
     "ws": "^8.18.0"
   },
