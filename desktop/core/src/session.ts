@@ -301,15 +301,38 @@ export class SessionRunner {
     this.onSample(sample);
   }
 
-  private async processStats(): Promise<{ cpu: number; mem: number }> {
-    const proc = this.browser.process();
+  private browserPid?: number;
 
-    if (!proc?.pid) {
+  private async resolveBrowserPid(): Promise<number | undefined> {
+    if (this.browserPid) return this.browserPid;
+
+    try {
+      const bcdp = await this.browser.newBrowserCDPSession();
+      try {
+        const info: any = await bcdp.send("SystemInfo.getProcessInfo" as any);
+        const main = (info?.processInfo ?? []).find(
+          (p: any) => p.type === "browser"
+        );
+        this.browserPid = main?.id;
+      } finally {
+        await bcdp.detach().catch(() => {});
+      }
+    } catch {
+      // keine Prozesswerte verfügbar
+    }
+
+    return this.browserPid;
+  }
+
+  private async processStats(): Promise<{ cpu: number; mem: number }> {
+    const pid = await this.resolveBrowserPid();
+
+    if (!pid) {
       return { cpu: 0, mem: 0 };
     }
 
     try {
-      const stats = await pidusage(proc.pid);
+      const stats = await pidusage(pid);
       return {
         cpu: stats.cpu ?? 0,
         mem: stats.memory ?? 0,
