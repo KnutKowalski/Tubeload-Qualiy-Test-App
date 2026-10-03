@@ -3,8 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "description": "TubeLoad QA Desktop App",
-  "author": "TubeLoad QA",
-  "license": "MIT",
+  "author": {
+    "name": "TubeLoad QA",
+    "email": "deine-adresse@beispiel.de"
+  },
+  "homepage": "https://github.com/KnutKowalski/Tubeload-Qualiy-Test-App",  "license": "MIT",
   "main": "electron/main.js",
   "scripts": {
     "start": "electron .",
