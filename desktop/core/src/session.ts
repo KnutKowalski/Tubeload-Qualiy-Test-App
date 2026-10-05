@@ -65,6 +65,13 @@ export class SessionRunner {
 
       await this.playCurrent(page);
 
+      const playback = await this.waitForPlayback(page);
+
+      if (!playback.ok) {
+        this.onSample(this.diagnosticSample(playback.state, playback.note));
+        this.stop();
+      }
+
       const human = this.cfg.humanize
         ? new HumanBehavior(page, this.abort.signal).run()
         : Promise.resolve();
@@ -81,6 +88,15 @@ export class SessionRunner {
       }
 
       await Promise.allSettled([human, repeater]);
+    } catch (e) {
+      this.onSample(
+        this.diagnosticSample(
+          "error",
+          e instanceof Error ? e.message : String(e)
+        )
+      );
+
+      throw e;
     } finally {
       clearInterval(sampler);
       await context.close().catch(() => {});
@@ -283,7 +299,7 @@ export class SessionRunner {
       kind: this.kind,
       queueIndex: this.queueIndex,
       url: page.url(),
-      state: stats?.state ?? "idle",
+      state: stats?.state ?? "no_video",
       currentTime: stats?.currentTime ?? 0,
       duration: stats?.duration ?? 0,
       bufferedSec: stats?.bufferedAhead ?? 0,
@@ -299,6 +315,140 @@ export class SessionRunner {
     };
 
     this.onSample(sample);
+  }
+
+  private async waitForPlayback(
+    page: Page
+  ): Promise<{ ok: boolean; state: string; note: string }> {
+    const timeoutMs = (this.cfg.startTimeoutSec ?? 45) * 1000;
+    const deadline = Date.now() + timeoutMs;
+    let consentRetried = false;
+
+    while (Date.now() < deadline && !this.abort.signal.aborted) {
+      const diag = await this.diagnose(page);
+
+      if (diag.state === "playing") {
+        return { ok: true, state: "playing", note: "" };
+      }
+
+      if (diag.consentVisible && !consentRetried) {
+        consentRetried = true;
+        await acceptConsent(page, this.cfg.consentMode ?? "reject");
+        await sleep(1500, this.abort.signal);
+        continue;
+      }
+
+      if (diag.blocked) {
+        return { ok: false, state: "blocked", note: diag.note };
+      }
+
+      await sleep(1000, this.abort.signal);
+    }
+
+    const diag = await this.diagnose(page);
+
+    return {
+      ok: false,
+      state: diag.hasVideo ? "not_playing" : "no_video",
+      note:
+        diag.note ||
+        `Keine Wiedergabe innerhalb von ${this.cfg.startTimeoutSec ?? 45} s gestartet.`,
+    };
+  }
+
+  private async diagnose(page: Page): Promise<{
+    state: string;
+    hasVideo: boolean;
+    blocked: boolean;
+    consentVisible: boolean;
+    note: string;
+  }> {
+    const diag = await page
+      .evaluate(() => {
+        const w = window as any;
+        const stats = w.__qa?.stats?.() ?? null;
+
+        const text = (document.body?.innerText ?? "").slice(0, 5000);
+
+        const botWall =
+          /Sign in to confirm|melde dich an, um zu bestätigen|unusual traffic|nicht ein Bot/i.test(
+            text
+          );
+
+        const consentVisible = !!document.querySelector(
+          'form[action*="consent"], button[aria-label*="Alle ablehnen" i]'
+        );
+
+        return {
+          state: stats?.state ?? "",
+          hasVideo: !!document.querySelector("video"),
+          botWall,
+          consentVisible,
+        };
+      })
+      .catch(() => null);
+
+    if (!diag) {
+      return {
+        state: "",
+        hasVideo: false,
+        blocked: false,
+        consentVisible: false,
+        note: "Seite nicht erreichbar (Navigation fehlgeschlagen?).",
+      };
+    }
+
+    if (diag.botWall) {
+      return {
+        state: diag.state,
+        hasVideo: diag.hasVideo,
+        blocked: true,
+        consentVisible: diag.consentVisible,
+        note: "YouTube blockiert die Wiedergabe (Bot-/Anmeldeprüfung).",
+      };
+    }
+
+    if (diag.consentVisible) {
+      return {
+        state: diag.state,
+        hasVideo: diag.hasVideo,
+        blocked: true,
+        consentVisible: true,
+        note: "Consent-Dialog konnte nicht automatisch abgewiesen werden.",
+      };
+    }
+
+    return {
+      state: diag.state,
+      hasVideo: diag.hasVideo,
+      blocked: false,
+      consentVisible: false,
+      note: diag.hasVideo ? "" : "Kein <video>-Element auf der Seite.",
+    };
+  }
+
+  private diagnosticSample(state: string, note: string): Sample {
+    return {
+      ts: Date.now(),
+      sessionId: this.cfg.id,
+      kind: this.kind,
+      queueIndex: this.queueIndex,
+      url: this.currentUrl,
+      state,
+      note,
+      currentTime: 0,
+      duration: 0,
+      bufferedSec: 0,
+      quality: "",
+      bandwidthMBps: 0,
+      cpuPercent: 0,
+      ramMb: 0,
+      rendererCpuPercent: 0,
+      jsHeapMb: 0,
+      stalls: 0,
+      droppedFrames: 0,
+      totalFrames: 0,
+    };
   }
 
   private browserPid?: number;
