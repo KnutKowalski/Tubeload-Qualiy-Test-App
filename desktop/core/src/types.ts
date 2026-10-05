@@ -21,6 +21,7 @@ export interface SessionConfig {
   humanize: boolean;
   repeat: boolean;
   maxRuntimeSec?: number;
+  startTimeoutSec?: number;
   mute?: boolean;
   consentMode?: ConsentMode;
 }
@@ -44,6 +45,7 @@ export interface Sample {
   stalls: number;
   droppedFrames: number;
   totalFrames: number;
+  note?: string;
 }
 
 export interface SessionSummary {
