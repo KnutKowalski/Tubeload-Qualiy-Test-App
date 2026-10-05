@@ -2,10 +2,14 @@ package dev.tubeload.qa.webview
 
 import android.annotation.SuppressLint
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.webkit.ConsoleMessage
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -16,6 +20,7 @@ import android.widget.EditText
 import android.widget.Spinner
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.webkit.WebViewAssetLoader
 import org.json.JSONObject
 
 class MainActivity : AppCompatActivity() {
@@ -28,6 +33,20 @@ class MainActivity : AppCompatActivity() {
     private lateinit var repeatCheck: CheckBox
 
     private var pendingConfig: String? = null
+
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    /**
+     * Liefert die player.html ueber einen echten HTTPS-Ursprung
+     * (https://appassets.androidplatform.net/assets/...).
+     * Die YouTube-Iframe-API ist ueber file://-Urspruenge unzuverlaessig,
+     * weil die PostMessage-Kommunikation an den Seitenursprung gebunden ist.
+     */
+    private val assetLoader by lazy {
+        WebViewAssetLoader.Builder()
+            .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(this))
+            .build()
+    }
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -61,11 +80,33 @@ class MainActivity : AppCompatActivity() {
         }
 
         web.webViewClient = object : WebViewClient() {
+            override fun shouldInterceptRequest(
+                view: WebView?,
+                request: WebResourceRequest?
+            ): WebResourceResponse? {
+                val url = request?.url ?: return null
+                return assetLoader.shouldInterceptRequest(url)
+            }
+
             override fun shouldOverrideUrlLoading(
                 view: WebView?,
                 request: WebResourceRequest?
             ): Boolean {
                 return false
+            }
+
+            override fun onReceivedError(
+                view: WebView?,
+                request: WebResourceRequest?,
+                error: WebResourceError?
+            ) {
+                super.onReceivedError(view, request, error)
+
+                if (request?.isForMainFrame == true) {
+                    runOnUiThread {
+                        status.text = "Ladefehler: ${error?.description ?: "unbekannt"}"
+                    }
+                }
             }
 
             override fun onPageFinished(view: WebView?, url: String?) {
@@ -74,14 +115,20 @@ class MainActivity : AppCompatActivity() {
                 val cfg = pendingConfig ?: return
                 pendingConfig = null
 
-                web.evaluateJavascript("window.startTest($cfg)", null)
+                injectConfig(cfg)
             }
         }
 
         web.webChromeClient = object : WebChromeClient() {
             override fun onConsoleMessage(consoleMessage: ConsoleMessage): Boolean {
-                val text = "${consoleMessage.message()} -- Line ${consoleMessage.lineNumber()}"
-                runOnUiThread { status.text = text }
+                // Nur echte JS-Fehler im Status anzeigen; normale
+                // Konsol-Meldungen ueberschreiben den Status nicht mehr.
+                if (consoleMessage.messageLevel() == ConsoleMessage.MessageLevel.ERROR) {
+                    runOnUiThread {
+                        status.text = "JS-Fehler: ${consoleMessage.message()} (Zeile ${consoleMessage.lineNumber()})"
+                    }
+                }
+
                 return true
             }
         }
@@ -91,7 +138,7 @@ class MainActivity : AppCompatActivity() {
                 @JavascriptInterface
                 fun log(payload: String) {
                     runOnUiThread {
-                        status.text = payload
+                        status.text = formatStatus(payload)
                     }
                 }
             },
@@ -104,6 +151,57 @@ class MainActivity : AppCompatActivity() {
 
         findViewById<Button>(R.id.stop).setOnClickListener {
             web.evaluateJavascript("window.stopPlayback && window.stopPlayback()", null)
+        }
+    }
+
+    /**
+     * Konfiguration in die Seite injizieren. Direkt nach onPageFinished kann
+     * window.startTest noch nicht definiert sein, daher bis zu 5 s wiederholen.
+     */
+    private fun injectConfig(cfg: String, attempt: Int = 0) {
+        web.evaluateJavascript(
+            "(function(){ if (typeof window.startTest !== 'function') return false; window.startTest(${cfg}); return true; })()"
+        ) { result ->
+            if (result == "true") {
+                return@evaluateJavascript
+            }
+
+            if (attempt < 20) {
+                mainHandler.postDelayed({ injectConfig(cfg, attempt + 1) }, 250)
+            } else {
+                status.text = "Start fehlgeschlagen: player.html nicht initialisiert."
+            }
+        }
+    }
+
+    /** JSON-Logzeile aus player.html in einen lesbaren Status uebersetzen. */
+    private fun formatStatus(payload: String): String {
+        return try {
+            val o = JSONObject(payload)
+
+            when (o.optString("state", "")) {
+                "ready" -> "Player bereit."
+                "playing" -> "Laeuft  %.0f s / %.0f s  Qualitaet %s  gepuffert %.0f%%".format(
+                    o.optDouble("currentTime", 0.0),
+                    o.optDouble("duration", 0.0),
+                    o.optString("quality", "?"),
+                    o.optDouble("loadedFraction", 0.0) * 100
+                )
+                "paused" -> "Pausiert  %.0f s".format(o.optDouble("currentTime", 0.0))
+                "buffering" -> "Puffert..."
+                "ended" -> "Beendet."
+                "stopped" -> "Gestoppt."
+                "quality_change" -> "Qualitaet: %s".format(o.optString("quality", "?"))
+                "not_playing" ->
+                    "Keine Wiedergabe: %s".format(o.optString("detail", "unbekannt"))
+                "error" -> "Fehler: %s (%s)".format(
+                    o.optString("error", "?"),
+                    o.optString("detail", "")
+                )
+                else -> "Status: %s".format(o.optString("state", payload))
+            }
+        } catch (e: Exception) {
+            payload
         }
     }
 
@@ -121,8 +219,9 @@ class MainActivity : AppCompatActivity() {
             .put("humanize", humanCheck.isChecked)
             .put("repeat", repeatCheck.isChecked)
             .put("mute", true)
+            .toString()
 
-        pendingConfig = cfg.toString()
-        web.loadUrl("file:///android_asset/player.html")
+        pendingConfig = cfg
+        web.loadUrl("https://appassets.androidplatform.net/assets/player.html")
     }
 }
