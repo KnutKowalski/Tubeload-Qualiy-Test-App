@@ -89,6 +89,7 @@ export function startServer(deps: ServerDeps) {
           maxRuntimeSec: body.maxRuntimeSec,
           mute: body.mute ?? true,
           consentMode: body.consentMode ?? "reject",
+          startTimeoutSec: body.startTimeoutSec ?? 45,
         };
 
         manager.start(cfg);
@@ -142,6 +143,7 @@ export function startServer(deps: ServerDeps) {
             maxRuntimeSec: body.session.maxRuntimeSec,
             mute: body.session.mute ?? true,
             consentMode: body.session.consentMode ?? "reject",
+            startTimeoutSec: body.session.startTimeoutSec ?? 45,
           },
         });
 
@@ -246,6 +248,10 @@ export function startServer(deps: ServerDeps) {
 
   manager.on("started", (sessionId: string) => {
     broadcast("status", { sessionId, state: "starting" });
+  });
+
+  manager.on("error", (sessionId: string, message: string) => {
+    broadcast("error", { sessionId, message });
   });
 
   manager.on("stopped", (sessionId: string) => {
