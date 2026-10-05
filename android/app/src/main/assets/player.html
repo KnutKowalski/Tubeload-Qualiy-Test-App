@@ -36,6 +36,37 @@
 
     var ytApiReady = false;
     var pendingStart = null;
+    var playbackWatchdog = null;
+
+    var YT_ERROR_TEXT = {
+      2: "Ungültige Videoparameter",
+      5: "HTML5-Player-Fehler",
+      100: "Video wurde entfernt oder ist privat",
+      101: "Einbetten dieses Videos ist nicht erlaubt",
+      150: "Einbetten dieses Videos ist nicht erlaubt"
+    };
+
+    function clearPlaybackWatchdog() {
+      if (playbackWatchdog) {
+        clearTimeout(playbackWatchdog);
+        playbackWatchdog = null;
+      }
+    }
+
+    function startPlaybackWatchdog() {
+      clearPlaybackWatchdog();
+
+      playbackWatchdog = setTimeout(function () {
+        try {
+          if (player && player.getPlayerState() !== YT.PlayerState.PLAYING) {
+            log({
+              state: "not_playing",
+              detail: "Keine Wiedergabe innerhalb von 20 Sekunden (Netzwerk, Embedding-Sperre oder Player-Fehler prüfen)."
+            });
+          }
+        } catch (e) {}
+      }, 20000);
+    }
 
     var qualityMap = {
       auto: "default",
@@ -286,6 +317,7 @@
 
     function cleanup() {
       try {
+        clearPlaybackWatchdog();
         if (metricsTimer) clearInterval(metricsTimer);
         if (humanTimer) clearTimeout(humanTimer);
         if (player && player.destroy) player.destroy();
@@ -360,10 +392,15 @@
 
             startMetricsLoop();
             humanLoop();
+            startPlaybackWatchdog();
           },
 
           onStateChange: function (e) {
             var st = stateName(e.data);
+
+            if (e.data === YT.PlayerState.PLAYING) {
+              clearPlaybackWatchdog();
+            }
 
             log({
               state: st,
@@ -389,9 +426,12 @@
           },
 
           onError: function (e) {
+            clearPlaybackWatchdog();
+
             log({
               state: "error",
-              error: e.data
+              error: e.data,
+              detail: YT_ERROR_TEXT[e.data] || "Unbekannter Fehler"
             });
           }
         }
@@ -438,6 +478,15 @@
         pendingStart = null;
       }
     };
+    setTimeout(function () {
+      if (!ytApiReady) {
+        log({
+          state: "error",
+          error: "api_timeout",
+          detail: "YouTube-Iframe-API konnte nicht geladen werden. Internetverbindung prüfen."
+        });
+      }
+    }, 15000);
   </script>
 
   <script src="https://www.youtube.com/iframe_api"></script>
