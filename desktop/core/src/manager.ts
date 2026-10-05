@@ -25,7 +25,13 @@ export class SessionManager extends EventEmitter {
 
     runner
       .run()
-      .catch(() => {})
+      .catch((err: unknown) => {
+        this.emit(
+          "error",
+          cfg.id,
+          err instanceof Error ? err.message : String(err)
+        );
+      })
       .finally(() => {
         this.runners.delete(cfg.id);
         this.emit("stopped", cfg.id);
