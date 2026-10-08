@@ -185,6 +185,7 @@
         <th>MB/s</th>
         <th>Buffer</th>
         <th>Stalls</th>
+        <th>Notizen</th>
         <th></th>
       </tr>
     </thead>
@@ -243,7 +244,7 @@
 
   <script>
     const API = "";
-    const ws = new WebSocket(`ws://${location.host}/ws`);
+    let ws = null;
 
     const latest = new Map();
     const sessions = new Map();
@@ -252,6 +253,9 @@
 
     const history = [];
     const MAX_HISTORY = 300;
+
+    // Ab dieser Zeit ohne Updates gilt eine Zeile als "eingefroren".
+    const STALE_AFTER_MS = 15000;
 
     const msgEl = document.getElementById("msg");
     const totalBwEl = document.getElementById("totalBw");
@@ -266,22 +270,38 @@
     const chart = document.getElementById("chart");
     const ctx = chart.getContext("2d");
 
-    ws.onmessage = (ev) => {
-      const msg = JSON.parse(ev.data);
+    function connectWs() {
+      ws = new WebSocket(`ws://${location.host}/ws`);
 
-      if (msg.type === "sample") {
-        handleSample(msg.data);
-      } else if (msg.type === "summary") {
-        summaries.set(msg.data.sessionId, msg.data);
-        renderSummaries();
-      } else if (msg.type === "status") {
-        if (msg.data.state === "stopped") {
-          sessions.delete(msg.data.sessionId);
-          latest.delete(msg.data.sessionId);
-          renderSessions();
+      ws.onmessage = (ev) => {
+        const msg = JSON.parse(ev.data);
+
+        if (msg.type === "sample") {
+          handleSample(msg.data);
+        } else if (msg.type === "summary") {
+          summaries.set(msg.data.sessionId, msg.data);
+          renderSummaries();
+        } else if (msg.type === "error") {
+          handleError(msg.data);
+        } else if (msg.type === "status") {
+          if (msg.data.state === "stopped") {
+            sessions.delete(msg.data.sessionId);
+            latest.delete(msg.data.sessionId);
+            renderSessions();
+          }
         }
-      }
-    };
+      };
+
+      // Core-Neustart (z. B. nach einem App-Update): Dashboard lädt neu,
+      // damit keine eingefrorenen Alt-Rows stehen bleiben.
+      ws.onclose = () => {
+        msgEl.classList.add("danger");
+        msgEl.textContent = "Verbindung zum Core verloren – Dashboard wird neu geladen...";
+        setTimeout(() => location.reload(), 2000);
+      };
+    }
+
+    connectWs();
 
     document.getElementById("sessionForm").onsubmit = async (e) => {
       e.preventDefault();
@@ -305,6 +325,7 @@
       });
 
       const j = await r.json();
+      msgEl.classList.toggle("danger", !j.ok);
       msgEl.textContent = j.ok
         ? `Session gestartet: ${j.id} (${j.kind})`
         : `Fehler: ${j.error}`;
@@ -340,6 +361,7 @@
       });
 
       const j = await r.json();
+      msgEl.classList.toggle("danger", !j.ok);
       msgEl.textContent = j.ok
         ? `Schedule hinzugefügt: ${j.schedule.id}`
         : `Fehler: ${j.error}`;
@@ -349,6 +371,24 @@
         renderSchedules();
       }
     };
+
+    function handleError(data) {
+      const { sessionId, message } = data ?? {};
+
+      if (sessionId && sessions.has(sessionId)) {
+        const prev = sessions.get(sessionId);
+        sessions.set(sessionId, {
+          ...prev,
+          state: "error",
+          note: message,
+        });
+        renderSessions();
+      }
+
+      msgEl.classList.add("danger");
+      msgEl.textContent =
+        `Fehler ${sessionId ? shortId(sessionId) : "?"}: ${message ?? "unbekannt"}`;
+    }
 
     function handleSample(s) {
       latest.set(s.sessionId, s);
@@ -399,16 +439,22 @@
       sessionsBody.innerHTML = "";
 
       for (const s of sessions.values()) {
+        const stale = !!s.ts && Date.now() - s.ts > STALE_AFTER_MS;
+        const badState = ["error", "blocked", "no_video", "not_playing"].includes(
+          s.state
+        );
+
         const tr = document.createElement("tr");
 
         tr.innerHTML = `
           <td title="${escapeHtml(s.sessionId)}">${escapeHtml(shortId(s.sessionId))}</td>
           <td>${escapeHtml(s.kind ?? "")}</td>
-          <td>${escapeHtml(s.state ?? "")}</td>
+          <td class="${badState ? "danger" : ""}">${escapeHtml(s.state ?? "")}${stale ? ' <span class="muted">(keine Updates)</span>' : ""}</td>
           <td>${escapeHtml(s.quality ?? "")}</td>
           <td>${(s.bandwidthMBps ?? 0).toFixed(2)}</td>
           <td>${(s.bufferedSec ?? 0).toFixed(1)}s</td>
           <td>${s.stalls ?? 0}</td>
+          <td class="muted">${escapeHtml(s.note ?? "")}</td>
           <td><button data-stop="${escapeHtml(s.sessionId)}">Stop</button></td>
         `;
 
@@ -469,6 +515,7 @@
         method: "DELETE",
       });
 
+      msgEl.classList.remove("danger");
       msgEl.textContent = "Session gestoppt: " + id;
     }
 
@@ -528,6 +575,9 @@
     }
 
     loadInitial();
+
+    // Regelmäßig neu rendern, damit Stale-Markierungen aktuell bleiben.
+    setInterval(renderSessions, 10000);
   </script>
 </body>
 </html>
