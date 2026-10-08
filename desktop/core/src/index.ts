@@ -1,6 +1,7 @@
 import path from "node:path";
 import fs from "node:fs";
 import { chromium } from "playwright-core";
+import type { Browser } from "playwright-core";
 
 import { SessionManager } from "./manager";
 import { SummaryStore } from "./aggregator";
@@ -10,7 +11,7 @@ import { startServer } from "./server";
 
 const HEADLESS = process.env.TB_HEADLESS !== "0";
 
-async function launchBrowser() {
+async function launchBrowserOnce(): Promise<Browser> {
   const args = [
     "--autoplay-policy=no-user-gesture-required",
     "--mute-audio",
@@ -66,7 +67,31 @@ async function launchBrowser() {
         ...candidate,
       });
     } catch (e) {
+      const label =
+        candidate.executablePath ?? candidate.channel ?? "Chromium-Standard";
+      console.error(`Browser-Kandidat fehlgeschlagen: ${label}`);
+      console.error(e);
       lastError = e;
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("Kein kompatibler Browser gefunden.");
+}
+
+async function launchBrowser(): Promise<Browser> {
+  let lastError: unknown = null;
+
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const browser = await launchBrowserOnce();
+      console.log(`Browser gestartet (Versuch ${attempt}).`);
+      return browser;
+    } catch (e) {
+      lastError = e;
+      console.error(`Browser-Start fehlgeschlagen (Versuch ${attempt}/3).`);
+      await new Promise((r) => setTimeout(r, 2000));
     }
   }
 
@@ -83,9 +108,11 @@ async function main() {
 
   fs.mkdirSync(dataDir, { recursive: true });
 
-  const browser = await launchBrowser();
+  let browser: Browser | null = null;
 
-  const manager = new SessionManager(browser);
+  // Manager startet OHNE Browser: Bis der Browser bereit ist, werden
+  // Session-Starts mit einer klaren Fehlermeldung abgelehnt.
+  const manager = new SessionManager(null);
   const csv = new CsvWriter(path.join(dataDir, "samples.csv"));
   const summaries = new SummaryStore();
   const scheduler = new Scheduler(
@@ -95,6 +122,9 @@ async function main() {
 
   scheduler.start();
 
+  // HTTP-Server ZUERST: /api/health antwortet sofort, unabhängig davon,
+  // ob/wann der Browser startet. Die Electron-App kann also nie wieder an
+  // einem Browser-Problem "ganz unten" hängen bleiben.
   const server = startServer({
     manager,
     csv,
@@ -106,6 +136,21 @@ async function main() {
   });
 
   console.log(`TubeLoad QA Core ready on http://127.0.0.1:${port}`);
+
+  // Browser im Hintergrund nachziehen (bis zu 3 Versuche).
+  launchBrowser()
+    .then((b) => {
+      browser = b;
+      manager.setBrowser(b);
+      console.log("Browser bereit – Sessions können starten.");
+    })
+    .catch((e) => {
+      console.error("Browser konnte nicht gestartet werden:");
+      console.error(e);
+      console.error(
+        "Session-Starts schlagen mit Fehlermeldung fehl, bis ein Browser verfügbar ist."
+      );
+    });
 
   const close = async () => {
     try {
@@ -121,7 +166,7 @@ async function main() {
     } catch {}
 
     try {
-      await browser.close();
+      await browser?.close();
     } catch {}
   };
 
