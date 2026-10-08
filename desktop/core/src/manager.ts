@@ -6,17 +6,33 @@ import type { Sample, SessionConfig } from "./types";
 
 export class SessionManager extends EventEmitter {
   private runners = new Map<string, SessionRunner>();
+  private browser: Browser | null;
 
-  constructor(private browser: Browser) {
+  constructor(browser: Browser | null) {
     super();
+    this.browser = browser;
+  }
+
+  /** Wird vom Core aufgerufen, sobald der Browser bereit ist. */
+  setBrowser(browser: Browser): void {
+    this.browser = browser;
   }
 
   start(cfg: SessionConfig): string {
+    const browser = this.browser;
+
+    if (!browser) {
+      const msg =
+        "Browser nicht verfügbar – Core konnte Chrome/Chromium nicht starten. Details stehen im core.log.";
+      this.emit("error", cfg.id, msg);
+      throw new Error(msg);
+    }
+
     if (this.runners.has(cfg.id)) {
       throw new Error(`Session ${cfg.id} existiert bereits.`);
     }
 
-    const runner = new SessionRunner(cfg, this.browser, (s: Sample) => {
+    const runner = new SessionRunner(cfg, browser, (s: Sample) => {
       this.emit("sample", s);
     });
 
