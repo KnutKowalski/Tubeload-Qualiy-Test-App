@@ -140,7 +140,17 @@ export class SessionRunner {
   }
 
   private async prepare(page: Page): Promise<void> {
-    await acceptConsent(page, this.cfg.consentMode ?? "reject");
+    const consentResult = await acceptConsent(
+      page,
+      this.cfg.consentMode ?? "reject"
+    );
+
+    // Cookie-Fallback hat die Seite neu geladen: Navigation abwarten.
+    if (consentResult === "cookie_fallback") {
+      await page
+        .waitForLoadState("domcontentloaded", { timeout: 30000 })
+        .catch(() => {});
+    }
 
     await page
       .waitForSelector("video", { timeout: 30000 })
@@ -322,7 +332,7 @@ export class SessionRunner {
   ): Promise<{ ok: boolean; state: string; note: string }> {
     const timeoutMs = (this.cfg.startTimeoutSec ?? 45) * 1000;
     const deadline = Date.now() + timeoutMs;
-    let consentRetried = false;
+    let consentAttempts = 0;
 
     while (Date.now() < deadline && !this.abort.signal.aborted) {
       const diag = await this.diagnose(page);
@@ -331,10 +341,21 @@ export class SessionRunner {
         return { ok: true, state: "playing", note: "" };
       }
 
-      if (diag.consentVisible && !consentRetried) {
-        consentRetried = true;
-        await acceptConsent(page, this.cfg.consentMode ?? "reject");
-        await sleep(1500, this.abort.signal);
+      if (diag.consentVisible && consentAttempts < 3) {
+        consentAttempts++;
+
+        const result = await acceptConsent(
+          page,
+          this.cfg.consentMode ?? "reject"
+        );
+
+        if (result === "cookie_fallback") {
+          await page
+            .waitForLoadState("domcontentloaded", { timeout: 30000 })
+            .catch(() => {});
+        }
+
+        await sleep(2000, this.abort.signal);
         continue;
       }
 
@@ -375,9 +396,12 @@ export class SessionRunner {
             text
           );
 
-        const consentVisible = !!document.querySelector(
-          'form[action*="consent"], button[aria-label*="Alle ablehnen" i]'
-        );
+        // Consent-Wand: Weiterleitung auf consent.* , Inline-Formular
+        // oder sichtbare Consent-Buttons (DE/EN).
+        const consentVisible =
+          location.hostname.startsWith("consent.") ||
+          !!document.querySelector('form[action*="consent"]') ||
+          /alle ablehnen|alle akzeptieren|reject all|accept all/i.test(text);
 
         return {
           state: stats?.state ?? "",
@@ -414,7 +438,7 @@ export class SessionRunner {
         hasVideo: diag.hasVideo,
         blocked: true,
         consentVisible: true,
-        note: "Consent-Dialog konnte nicht automatisch abgewiesen werden.",
+        note: "Consent-Dialog trotz automatischem Abnicken (3 Versuche inkl. Cookie-Fallback) noch sichtbar.",
       };
     }
 
