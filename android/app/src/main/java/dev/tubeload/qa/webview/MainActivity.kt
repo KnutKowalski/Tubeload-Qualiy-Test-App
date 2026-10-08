@@ -5,6 +5,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.webkit.ConsoleMessage
+import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
@@ -78,6 +79,11 @@ class MainActivity : AppCompatActivity() {
             displayZoomControls = false
             mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
         }
+
+        // Cookies aktivieren, damit die vorab gesetzten Consent-Cookies
+        // (siehe primeConsentCookies) an den YouTube-Embed gesendet werden.
+        CookieManager.getInstance().setAcceptCookie(true)
+        CookieManager.getInstance().setAcceptThirdPartyCookies(web, true)
 
         web.webViewClient = object : WebViewClient() {
             override fun shouldInterceptRequest(
@@ -155,6 +161,27 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
+     * Setzt die YouTube-Consent-Cookies (SOCS/CONSENT) vorab im WebView —
+     * so wie es YouTube nach einem Klick auf "Alle akzeptieren" selbst
+     * tun wuerde. Damit zeigt der YouTube-Embed keine Consent-/Datenschutz-
+     * Wand mehr, die die automatische Wiedergabe blockieren wuerde.
+     */
+    private fun primeConsentCookies() {
+        val cm = CookieManager.getInstance()
+
+        val socs = "SOCS=CAE; Path=/; Secure; Domain=.youtube.com"
+        val consent =
+            "CONSENT=YES+cb.20210328-17-p0.en+FX+419; Path=/; Secure; Domain=.youtube.com"
+
+        cm.setCookie("https://www.youtube.com", socs)
+        cm.setCookie("https://www.youtube.com", consent)
+        cm.setCookie("https://consent.youtube.com", socs)
+        cm.setCookie("https://consent.youtube.com", consent)
+
+        cm.flush()
+    }
+
+    /**
      * Konfiguration in die Seite injizieren. Direkt nach onPageFinished kann
      * window.startTest noch nicht definiert sein, daher bis zu 5 s wiederholen.
      */
@@ -212,6 +239,10 @@ class MainActivity : AppCompatActivity() {
             status.text = "Bitte URL eingeben."
             return
         }
+
+        // Consent-Status setzen, BEVOR der Embed geladen wird,
+        // damit YouTube gar keine Consent-Wand zeigt.
+        primeConsentCookies()
 
         val cfg = JSONObject()
             .put("url", url)
