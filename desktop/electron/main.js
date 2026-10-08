@@ -1,10 +1,13 @@
 const { app, BrowserWindow, dialog } = require("electron");
 const { spawn } = require("child_process");
+const fs = require("fs");
 const path = require("path");
 const net = require("net");
 
 let win = null;
 let coreProcess = null;
+let coreLogTail = "";
+let logPath = null;
 
 function getFreePort() {
   return new Promise((resolve, reject) => {
@@ -18,10 +21,19 @@ function getFreePort() {
   });
 }
 
+function appendCoreLog(chunk) {
+  coreLogTail = (coreLogTail + chunk).slice(-8000);
+
+  try {
+    fs.appendFileSync(logPath, chunk);
+  } catch {}
+}
+
 async function waitForHealth(port, child) {
   const url = `http://127.0.0.1:${port}/api/health`;
 
-  for (let i = 0; i < 120; i++) {
+  // 240 x 500 ms = 120 s Startfenster (vorher 60 s).
+  for (let i = 0; i < 240; i++) {
     if (child.killed || child.exitCode !== null) {
       return false;
     }
@@ -48,6 +60,11 @@ async function createWindow() {
 
   const port = await getFreePort();
   const dataDir = path.join(app.getPath("userData"), "data");
+  logPath = path.join(app.getPath("userData"), "core.log");
+
+  try {
+    fs.writeFileSync(logPath, "");
+  } catch {}
 
   const coreDir = app.isPackaged
     ? path.join(process.resourcesPath, "core")
@@ -71,14 +88,17 @@ async function createWindow() {
 
   coreProcess.stdout.on("data", (data) => {
     process.stdout.write(`[core] ${data}`);
+    appendCoreLog(data);
   });
 
   coreProcess.stderr.on("data", (data) => {
     process.stderr.write(`[core] ${data}`);
+    appendCoreLog(data);
   });
 
   coreProcess.on("exit", (code) => {
     console.log(`Core exited with code ${code}`);
+    appendCoreLog(`\n[Core-Prozess beendet mit Code ${code}]\n`);
   });
 
   const ready = await waitForHealth(port, coreProcess);
@@ -87,10 +107,15 @@ async function createWindow() {
     dialog.showErrorBox(
       "TubeLoad QA Startfehler",
       "Der TubeLoad-Core konnte nicht starten.\n\n" +
+        "Letzte Core-Ausgabe:\n" +
+        "---------------------------\n" +
+        (coreLogTail.trim() || "(keine Ausgabe – Core evtl. vor dem Start abgestürzt)") +
+        "\n---------------------------\n\n" +
+        "Vollständiges Log: " + logPath + "\n\n" +
         "Prüfe:\n" +
-        "- Ist Google Chrome oder Chromium installiert?\n" +
-        "- Wurde desktop/core gebaut? npm --prefix core run build\n" +
-        "- Optional TB_CHROME_PATH setzen.\n"
+        "- Ist Google Chrome oder Chromium installiert? (google-chrome --version)\n" +
+        "- Läuft noch eine alte App-Instanz im Hintergrund? Beenden und neu starten\n" +
+        "- Optional TB_CHROME_PATH auf den Chrome-Pfad setzen"
     );
     app.quit();
     return;
