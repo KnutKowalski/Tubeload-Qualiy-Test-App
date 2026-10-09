@@ -2,15 +2,17 @@ import type { QualityLabel } from "./types";
 
 export const sleep = (ms: number, signal?: AbortSignal) =>
   new Promise<void>((resolve) => {
-    const t = setTimeout(resolve, ms);
-    signal?.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(t);
-        resolve();
-      },
-      { once: true }
-    );
+    const onAbort = () => {
+      clearTimeout(t);
+      resolve();
+    };
+
+    const t = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+
+    signal?.addEventListener("abort", onAbort, { once: true });
   });
 
 export const rand = (min: number, max: number) =>
