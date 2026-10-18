@@ -1,12 +1,14 @@
 package dev.tubeload.qa.webview
 
 import android.annotation.SuppressLint
+import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.view.ViewGroup
 import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
-import android.webkit.JavascriptInterface
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -14,23 +16,43 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
-import android.widget.Spinner
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.webkit.WebViewAssetLoader
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 import org.json.JSONObject
+
+/** Host, unter dem die lokale player.html ausgeliefert wird (https statt file://). */
+private const val ASSET_HOST = "appassets.androidplatform.net"
+
+/** Name des JS-Objekts, über das player.html Statusmeldungen an die App schickt. */
+private const val BRIDGE_NAME = "TubeloadBridge"
+
+/** Nur diese Hosts dürfen getestet werden. */
+private val ALLOWED_HOSTS = setOf(
+    "youtube.com",
+    "www.youtube.com",
+    "m.youtube.com",
+    "music.youtube.com",
+    "youtu.be"
+)
+
+/** Begrenzungen: ein Test ist eine zeitlich und in Wiederholungen beschränkte Messung. */
+private const val DEFAULT_MINUTES = 30
+private const val MAX_MINUTES = 240
+private const val MAX_LOOPS = 3
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var web: WebView
     private lateinit var status: TextView
     private lateinit var urlInput: EditText
-    private lateinit var qualitySpinner: Spinner
-    private lateinit var humanCheck: CheckBox
+    private lateinit var minutesInput: EditText
     private lateinit var repeatCheck: CheckBox
 
     private var pendingConfig: String? = null
@@ -57,16 +79,8 @@ class MainActivity : AppCompatActivity() {
         web = findViewById(R.id.web)
         status = findViewById(R.id.status)
         urlInput = findViewById(R.id.url)
-        qualitySpinner = findViewById(R.id.quality)
-        humanCheck = findViewById(R.id.human)
+        minutesInput = findViewById(R.id.minutes)
         repeatCheck = findViewById(R.id.repeat)
-
-        val qualities = listOf("auto", "480p", "720p", "1080p", "1440p", "2160p")
-        qualitySpinner.adapter = ArrayAdapter(
-            this,
-            android.R.layout.simple_spinner_dropdown_item,
-            qualities
-        )
 
         web.settings.apply {
             javaScriptEnabled = true
@@ -77,11 +91,16 @@ class MainActivity : AppCompatActivity() {
             setSupportZoom(false)
             builtInZoomControls = false
             displayZoomControls = false
-            mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+
+            // Keine Mischinhalte, kein Zugriff auf lokale Dateien/Content-Provider.
+            mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+            allowFileAccess = false
+            allowContentAccess = false
         }
 
         // Cookies aktivieren, damit die vorab gesetzten Consent-Cookies
         // (siehe primeConsentCookies) an den YouTube-Embed gesendet werden.
+        // Der Embed laeuft in einem Drittanbieter-Frame und braucht sie.
         CookieManager.getInstance().setAcceptCookie(true)
         CookieManager.getInstance().setAcceptThirdPartyCookies(web, true)
 
@@ -94,11 +113,17 @@ class MainActivity : AppCompatActivity() {
                 return assetLoader.shouldInterceptRequest(url)
             }
 
+            // Der Hauptframe darf die lokale Seite nie verlassen (z. B. durch Links im
+            // Embed). Navigationen in Unterframes (der YouTube-Player) bleiben erlaubt.
             override fun shouldOverrideUrlLoading(
                 view: WebView?,
                 request: WebResourceRequest?
             ): Boolean {
-                return false
+                if (request == null) return true
+                if (!request.isForMainFrame) return false
+
+                val url = request.url
+                return !(url.scheme == "https" && url.host == ASSET_HOST)
             }
 
             override fun onReceivedError(
@@ -123,6 +148,24 @@ class MainActivity : AppCompatActivity() {
 
                 injectConfig(cfg)
             }
+
+            // Stirbt der Renderer-Prozess (z. B. Speichermangel), wuerde die App sonst
+            // abstuerzen. Die WebView ist danach unbrauchbar: aufraeumen und beenden.
+            override fun onRenderProcessGone(
+                view: WebView?,
+                detail: RenderProcessGoneDetail?
+            ): Boolean {
+                runOnUiThread {
+                    Toast.makeText(
+                        this@MainActivity,
+                        "Der WebView-Prozess wurde beendet. Bitte die App neu starten.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    finish()
+                }
+
+                return true
+            }
         }
 
         web.webChromeClient = object : WebChromeClient() {
@@ -139,17 +182,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        web.addJavascriptInterface(
-            object {
-                @JavascriptInterface
-                fun log(payload: String) {
-                    runOnUiThread {
-                        status.text = formatStatus(payload)
-                    }
-                }
-            },
-            "Android"
-        )
+        installBridge()
 
         findViewById<Button>(R.id.start).setOnClickListener {
             startTest()
@@ -161,10 +194,37 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Setzt die YouTube-Consent-Cookies (SOCS/CONSENT) vorab im WebView —
-     * so wie es YouTube nach einem Klick auf "Alle akzeptieren" selbst
-     * tun wuerde. Damit zeigt der YouTube-Embed keine Consent-/Datenschutz-
-     * Wand mehr, die die automatische Wiedergabe blockieren wuerde.
+     * Statusmeldungen der player.html. Anders als addJavascriptInterface ist dieser
+     * Kanal an einen Ursprung gebunden: nur die lokale Seite (und nicht der
+     * YouTube-Frame oder eine fremde Seite) kann der App Nachrichten schicken.
+     */
+    private fun installBridge() {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
+            status.text = "Diese WebView-Version wird nicht unterstuetzt. Bitte 'Android System WebView' aktualisieren."
+            return
+        }
+
+        WebViewCompat.addWebMessageListener(
+            web,
+            BRIDGE_NAME,
+            setOf("https://$ASSET_HOST"),
+            WebViewCompat.WebMessageListener { _, message, _, isMainFrame, _ ->
+                val payload = message.data
+
+                if (isMainFrame && payload != null) {
+                    runOnUiThread {
+                        status.text = formatStatus(payload)
+                    }
+                }
+            }
+        )
+    }
+
+    /**
+     * Setzt die YouTube-Consent-Cookies (SOCS/CONSENT) vorab im WebView, damit der
+     * Embed keine Consent-Wand zeigt, die die automatische Wiedergabe blockieren
+     * wuerde. Die Werte sind vorgefertigt und koennen von YouTube jederzeit
+     * ungueltig werden – dann erscheint der Dialog wieder.
      */
     private fun primeConsentCookies() {
         val cm = CookieManager.getInstance()
@@ -208,15 +268,17 @@ class MainActivity : AppCompatActivity() {
 
             when (o.optString("state", "")) {
                 "ready" -> "Player bereit."
-                "playing" -> "Laeuft  %.0f s / %.0f s  Qualitaet %s  gepuffert %.0f%%".format(
+                "playing" -> "Laeuft  %.0f s / %.0f s  gepuffert %.0f%%  Durchlauf %d".format(
                     o.optDouble("currentTime", 0.0),
                     o.optDouble("duration", 0.0),
-                    o.optString("quality", "?"),
-                    o.optDouble("loadedFraction", 0.0) * 100
+                    o.optDouble("loadedFraction", 0.0) * 100,
+                    o.optInt("loop", 1)
                 )
                 "paused" -> "Pausiert  %.0f s".format(o.optDouble("currentTime", 0.0))
                 "buffering" -> "Puffert..."
                 "ended" -> "Beendet."
+                "completed" -> "Fertig nach %d Durchlauf/Durchlaeufen.".format(o.optInt("loops", 1))
+                "max_runtime" -> "Maximale Laufzeit erreicht – Test beendet."
                 "stopped" -> "Gestoppt."
                 "quality_change" -> "Qualitaet: %s".format(o.optString("quality", "?"))
                 "not_playing" ->
@@ -232,6 +294,17 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun isAllowedUrl(raw: String): Boolean {
+        val uri = Uri.parse(raw)
+
+        if (uri.scheme != "https") return false
+        if (uri.userInfo != null) return false
+
+        val host = uri.host?.lowercase() ?: return false
+
+        return host in ALLOWED_HOSTS
+    }
+
     private fun startTest() {
         val url = urlInput.text.toString().trim()
 
@@ -240,19 +313,39 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
+        if (!isAllowedUrl(url)) {
+            status.text = "Nur https-URLs von youtube.com, m./music.youtube.com und youtu.be sind erlaubt."
+            return
+        }
+
+        val minutes = minutesInput.text.toString().trim().toIntOrNull()
+            ?.coerceIn(1, MAX_MINUTES)
+            ?: DEFAULT_MINUTES
+
         // Consent-Status setzen, BEVOR der Embed geladen wird,
         // damit YouTube gar keine Consent-Wand zeigt.
         primeConsentCookies()
 
         val cfg = JSONObject()
             .put("url", url)
-            .put("quality", qualitySpinner.selectedItem.toString())
-            .put("humanize", humanCheck.isChecked)
             .put("repeat", repeatCheck.isChecked)
+            .put("maxLoops", MAX_LOOPS)
+            .put("maxRuntimeSec", minutes * 60)
             .put("mute", true)
             .toString()
 
         pendingConfig = cfg
-        web.loadUrl("https://appassets.androidplatform.net/assets/player.html")
+        web.loadUrl("https://$ASSET_HOST/assets/player.html")
+    }
+
+    override fun onDestroy() {
+        mainHandler.removeCallbacksAndMessages(null)
+
+        // WebView sauber abbauen (sonst bleiben Timer/Player im Hintergrund aktiv).
+        web.evaluateJavascript("window.stopPlayback && window.stopPlayback()", null)
+        (web.parent as? ViewGroup)?.removeView(web)
+        web.destroy()
+
+        super.onDestroy()
     }
 }

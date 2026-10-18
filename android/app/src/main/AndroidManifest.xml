@@ -3,15 +3,21 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!--
+        Kein Klartext-Verkehr (alles läuft über https) und keine Backups:
+        der WebView-Speicher enthält Cookies, die nicht in Backups gehören.
+    -->
     <application
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:usesCleartextTraffic="true"
+        android:usesCleartextTraffic="false"
         android:theme="@style/Theme.AppCompat.Light.DarkActionBar">
 
+        <!-- configChanges: Drehen des Geräts darf einen laufenden Test nicht neu starten. -->
         <activity
             android:name=".MainActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

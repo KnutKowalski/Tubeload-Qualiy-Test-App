@@ -1,3 +1,9 @@
 <resources>
     <string name="app_name">TubeLoad QA</string>
+    <string name="url_hint">YouTube Video- oder Playlist-URL</string>
+    <string name="minutes_hint">Min. (30)</string>
+    <string name="repeat_label">Wiederholen (max. 3×)</string>
+    <string name="start_label">Start</string>
+    <string name="stop_label">Stop</string>
+    <string name="status_ready">Bereit</string>
 </resources>
