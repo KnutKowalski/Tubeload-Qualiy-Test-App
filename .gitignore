@@ -1,0 +1,21 @@
+# Node / Build
+node_modules/
+dist/
+release/
+data/
+*.log
+*.tsbuildinfo
+
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+*.apk
+*.aab
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
