@@ -1,20 +1,30 @@
 {
   "name": "tubeload-qa-desktop",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "TubeLoad QA Desktop App",
   "author": {
     "name": "TubeLoad QA",
     "email": "knutkowalski@hotmail.de"
   },
-  "homepage": "https://github.com/KnutKowalski/Tubeload-Qualiy-Test-App",  "license": "MIT",
+  "homepage": "https://github.com/KnutKowalski/Tubeload-Qualiy-Test-App",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/KnutKowalski/Tubeload-Qualiy-Test-App.git"
+  },
+  "license": "MIT",
   "main": "electron/main.js",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "start": "electron .",
+    "build:core": "npm --prefix core ci && npm --prefix core run build",
+    "pack": "electron-builder --dir",
     "dist": "electron-builder"
   },
   "devDependencies": {
-    "electron": "^31.3.0",
-    "electron-builder": "^24.13.3"
+    "electron": "^44.9.0",
+    "electron-builder": "^26.15.3"
   }
 }

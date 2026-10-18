@@ -3,47 +3,62 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="tb-token" content="{{TOKEN}}" />
   <title>TubeLoad QA</title>
-  <style>
+  <style nonce="{{NONCE}}">
     :root {
       color-scheme: dark;
+      --bg: #111;
+      --panel: #181818;
+      --field: #1d1d1d;
+      --line: #333;
+      --text: #eee;
+      --muted: #9a9a9a;
+      --accent: #4af;
+      --danger: #f88;
+      --ok: #7d7;
     }
+
+    * { box-sizing: border-box; }
 
     body {
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
       margin: 16px;
-      background: #111;
-      color: #eee;
+      background: var(--bg);
+      color: var(--text);
     }
 
-    h1, h2, h3 {
-      margin: 10px 0;
-    }
+    h1, h2 { margin: 10px 0; }
+    h1 { font-size: 24px; }
+    h2 { font-size: 18px; margin-top: 24px; }
 
-    input, select, button, textarea {
+    input, select, button {
       padding: 7px 9px;
       margin: 3px;
-      background: #1d1d1d;
-      color: #eee;
-      border: 1px solid #333;
+      background: var(--field);
+      color: var(--text);
+      border: 1px solid var(--line);
       border-radius: 6px;
       font: inherit;
     }
 
-    button {
-      cursor: pointer;
+    input:focus-visible, select:focus-visible, button:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 1px;
     }
 
-    button:hover {
-      background: #282828;
-    }
+    button { cursor: pointer; }
+    button:hover { background: #282828; }
+    button.primary { border-color: var(--accent); }
 
-    .row {
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-      align-items: center;
-    }
+    label { display: inline-flex; align-items: center; gap: 4px; }
+    label input { margin: 0; }
+
+    .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+
+    .url { flex: 1 1 420px; min-width: 240px; }
+    .num { width: 110px; }
+    .cron { width: 170px; }
 
     .grid {
       display: grid;
@@ -53,24 +68,26 @@
     }
 
     .card {
-      background: #181818;
-      border: 1px solid #333;
+      background: var(--panel);
+      border: 1px solid var(--line);
       padding: 10px 12px;
       border-radius: 10px;
     }
 
-    .card b {
-      font-size: 20px;
-    }
+    .card b { font-size: 20px; display: block; margin-top: 2px; }
+    .card small { color: var(--muted); }
 
     canvas {
+      display: block;
       background: #151515;
-      border: 1px solid #333;
+      border: 1px solid var(--line);
       width: 100%;
       height: 180px;
       border-radius: 10px;
       margin: 10px 0;
     }
+
+    .scroll { overflow-x: auto; }
 
     table {
       width: 100%;
@@ -86,55 +103,53 @@
       vertical-align: top;
     }
 
-    th {
-      color: #aaa;
-      font-weight: 600;
-    }
+    th { color: #aaa; font-weight: 600; white-space: nowrap; }
+    td.num-cell { font-variant-numeric: tabular-nums; white-space: nowrap; }
+    td.url-cell { word-break: break-all; max-width: 360px; }
 
-    .muted {
-      color: #888;
-    }
+    .muted { color: var(--muted); }
+    .danger { color: var(--danger); }
+    .ok { color: var(--ok); }
 
-    #msg {
-      min-height: 1.2em;
-      color: #8ff;
-      margin: 6px 0;
-    }
+    .empty { color: var(--muted); padding: 10px 8px; }
 
-    .danger {
-      color: #f88;
-    }
+    #msg { min-height: 1.4em; margin: 8px 0; color: #8ff; }
+    #msg.danger { color: var(--danger); }
+
+    #conn { font-size: 12px; color: var(--muted); }
+    #conn.bad { color: var(--danger); }
+
+    .note { color: var(--muted); font-size: 13px; max-width: 900px; }
   </style>
 </head>
 <body>
   <h1>TubeLoad QA</h1>
-  <div class="muted">
-    Netzwerk-/Streaming-Qualitätstest mit Playwright-Chromium. Nur für legitime QA-Zwecke verwenden.
-  </div>
+  <p class="note">
+    Misst die Wiedergabequalität der eigenen Netzwerkverbindung (Bandbreite, Puffer,
+    Stalls, Auflösung, CPU/RAM). Sessions sind in Dauer, Wiederholungen und Anzahl begrenzt.
+    Die Nutzungsbedingungen von YouTube gelten weiterhin; die App ist nicht dafür gedacht,
+    Aufrufzahlen oder andere Kennzahlen zu beeinflussen.
+  </p>
+  <div id="conn" role="status">Verbinde…</div>
 
   <h2>Session starten</h2>
 
   <form id="sessionForm" class="row">
-    <input
-      name="url"
-      placeholder="YouTube Video-, Playlist- oder Kanal-URL"
-      size="78"
-      required
-    />
+    <input class="url" name="url" aria-label="YouTube-URL" placeholder="YouTube Video-, Playlist- oder Kanal-URL" required maxlength="2048" />
 
-    <select id="recentUrls" title="Zuletzt verwendete URLs">
+    <select id="recentUrls" aria-label="Zuletzt verwendete URLs" title="Zuletzt verwendete URLs">
       <option value="">Letzte URLs…</option>
     </select>
 
-    <select name="kind">
-      <option value="auto">auto erkennen</option>
+    <select name="kind" aria-label="Typ">
+      <option value="auto">Typ: automatisch</option>
       <option value="video">Video</option>
       <option value="playlist">Playlist</option>
       <option value="channel">Kanal</option>
     </select>
 
-    <select name="quality">
-      <option value="auto">auto</option>
+    <select name="quality" aria-label="Auflösung">
+      <option value="auto">Auflösung: auto</option>
       <option value="144p">144p</option>
       <option value="240p">240p</option>
       <option value="360p">360p</option>
@@ -145,85 +160,96 @@
       <option value="2160p">2160p</option>
     </select>
 
-    <input name="minutes" type="number" min="1" placeholder="Minuten" style="width:110px" />
+    <input class="num" name="minutes" type="number" min="1" max="240" step="1" aria-label="Maximale Laufzeit in Minuten" placeholder="Min. (30)" />
 
-    <label><input type="checkbox" name="humanize" checked /> Human</label>
-    <label><input type="checkbox" name="repeat" checked /> Repeat</label>
+    <label><input type="checkbox" name="repeat" /> Wiederholen</label>
+    <input class="num" name="loops" type="number" min="1" max="10" step="1" aria-label="Durchläufe (höchstens 10)" placeholder="Läufe (3)" />
 
-    <button>Start</button>
-    <button type="button" onclick="location.href='/export/samples.csv'">Samples CSV</button>
-    <button type="button" onclick="location.href='/export/summaries.csv'">Summaries CSV</button>
+    <button class="primary" type="submit">Start</button>
+    <button type="button" id="exportSamples">Samples CSV</button>
+    <button type="button" id="exportSummaries">Summaries CSV</button>
   </form>
 
-  <div id="msg"></div>
+  <div id="msg" role="status" aria-live="polite"></div>
 
   <div class="grid">
     <div class="card">
-      Gesamt-Bandbreite<br />
+      Gesamt-Bandbreite
       <b id="totalBw">0.00 MB/s</b>
     </div>
 
     <div class="card">
-      CPU Browser<br />
+      CPU Browser (alle Prozesse)
       <b id="cpu">0 %</b>
+      <small>100 % = ein Kern</small>
     </div>
 
     <div class="card">
-      RAM Browser<br />
+      RAM Browser (alle Prozesse)
       <b id="ram">0 MB</b>
     </div>
 
     <div class="card">
-      Aktive Sessions<br />
+      Aktive Sessions
       <b id="activeCount">0</b>
     </div>
   </div>
 
-  <canvas id="chart" width="1200" height="180"></canvas>
+  <canvas id="chart" aria-label="Gesamt-Bandbreite der letzten Minuten"></canvas>
 
   <h2>Aktive Sessions</h2>
-  <table>
-    <thead>
-      <tr>
-        <th>ID</th>
-        <th>Typ</th>
-        <th>State</th>
-        <th>Quality</th>
-        <th>MB/s</th>
-        <th>Buffer</th>
-        <th>Stalls</th>
-        <th>Notizen</th>
-        <th></th>
-      </tr>
-    </thead>
-    <tbody id="sessionsBody"></tbody>
-  </table>
+  <div class="scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Typ</th>
+          <th>Status</th>
+          <th>Auflösung</th>
+          <th>MB/s</th>
+          <th>Puffer</th>
+          <th>Stalls</th>
+          <th>Startzeit</th>
+          <th>Notizen</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="sessionsBody"></tbody>
+    </table>
+  </div>
 
   <h2>Session-Zusammenfassungen</h2>
-  <table>
-    <thead>
-      <tr>
-        <th>ID</th>
-        <th>Laufzeit</th>
-        <th>Ø MB/s</th>
-        <th>Peak MB/s</th>
-        <th>P95 MB/s</th>
-        <th>Stalls</th>
-        <th>Stall s</th>
-        <th>Quality</th>
-        <th>Drop %</th>
-      </tr>
-    </thead>
-    <tbody id="summariesBody"></tbody>
-  </table>
+  <div class="scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Laufzeit</th>
+          <th>Ø MB/s</th>
+          <th>Peak MB/s</th>
+          <th>P95 MB/s</th>
+          <th>Stalls</th>
+          <th>Stall s</th>
+          <th>Rebuffer</th>
+          <th>Startzeit</th>
+          <th>Auflösung</th>
+          <th>Drop %</th>
+          <th>Ende</th>
+          <th>Notiz</th>
+        </tr>
+      </thead>
+      <tbody id="summariesBody"></tbody>
+    </table>
+  </div>
 
   <h2>Scheduler</h2>
 
   <form id="scheduleForm" class="row">
-    <input name="cron" placeholder="Cron, z. B. 0 2 * * *" required />
-    <input name="url" placeholder="URL" size="55" required />
-    <select name="quality">
-      <option value="auto">auto</option>
+    <input class="cron" name="cron" aria-label="Cron-Ausdruck" placeholder="Cron, z. B. 0 2 * * *" required maxlength="100" />
+    <input class="url" name="url" aria-label="YouTube-URL" placeholder="URL" required maxlength="2048" />
+
+    <select name="quality" aria-label="Auflösung">
+      <option value="auto">Auflösung: auto</option>
       <option value="144p">144p</option>
       <option value="240p">240p</option>
       <option value="360p">360p</option>
@@ -233,31 +259,39 @@
       <option value="1440p">1440p</option>
       <option value="2160p">2160p</option>
     </select>
-    <input name="minutes" type="number" min="1" placeholder="Minuten" style="width:110px" />
-    <label><input type="checkbox" name="humanize" checked /> Human</label>
-    <label><input type="checkbox" name="repeat" checked /> Repeat</label>
-    <button>Plan hinzufügen</button>
+
+    <input class="num" name="minutes" type="number" min="1" max="240" step="1" aria-label="Maximale Laufzeit in Minuten" placeholder="Min. (30)" />
+
+    <label><input type="checkbox" name="repeat" /> Wiederholen</label>
+    <input class="num" name="loops" type="number" min="1" max="10" step="1" aria-label="Durchläufe (höchstens 10)" placeholder="Läufe (3)" />
+
+    <button class="primary" type="submit">Plan hinzufügen</button>
   </form>
+  <p class="note">Läufe müssen mindestens 5 Minuten auseinanderliegen. Ein Lauf wird übersprungen, wenn der vorherige noch aktiv ist.</p>
 
-  <table>
-    <thead>
-      <tr>
-        <th>Cron</th>
-        <th>URL</th>
-        <th>Nächster Lauf</th>
-        <th>Letzter Lauf</th>
-        <th></th>
-      </tr>
-    </thead>
-    <tbody id="schedulesBody"></tbody>
-  </table>
+  <div class="scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>Cron</th>
+          <th>URL</th>
+          <th>Status</th>
+          <th>Nächster Lauf</th>
+          <th>Letzter Lauf</th>
+          <th>Hinweis</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="schedulesBody"></tbody>
+    </table>
+  </div>
 
-  <script>
-    const API = "";
-    let ws = null;
+  <script nonce="{{NONCE}}">
+    "use strict";
 
-    const latest = new Map();
-    const sessions = new Map();
+    const TOKEN = document.querySelector('meta[name="tb-token"]').content;
+
+    const sessions = new Map(); // sessionId -> letzte Zeile (Sample oder Platzhalter)
     const summaries = new Map();
     const schedules = new Map();
 
@@ -266,30 +300,159 @@
 
     // Ab dieser Zeit ohne Updates gilt eine Zeile als "eingefroren".
     const STALE_AFTER_MS = 15000;
+    // Ein Sample jünger als das zählt für die Gesamtwerte.
+    const FRESH_MS = 5000;
 
     // URL-Verlauf (lokal im Browser, überlebt App-Neustarts).
     const RECENT_KEY = "tb_recent_urls";
     const RECENT_MAX = 10;
 
-    const msgEl = document.getElementById("msg");
-    const totalBwEl = document.getElementById("totalBw");
-    const cpuEl = document.getElementById("cpu");
-    const ramEl = document.getElementById("ram");
-    const activeCountEl = document.getElementById("activeCount");
-    const recentUrlsEl = document.getElementById("recentUrls");
+    let maxSessions = null;
+    let browserLoad = { cpu: 0, ram: 0, ts: 0 };
 
-    const sessionsBody = document.getElementById("sessionsBody");
-    const summariesBody = document.getElementById("summariesBody");
-    const schedulesBody = document.getElementById("schedulesBody");
+    const $ = (id) => document.getElementById(id);
 
-    const chart = document.getElementById("chart");
+    const msgEl = $("msg");
+    const connEl = $("conn");
+    const totalBwEl = $("totalBw");
+    const cpuEl = $("cpu");
+    const ramEl = $("ram");
+    const activeCountEl = $("activeCount");
+    const recentUrlsEl = $("recentUrls");
+    const sessionsBody = $("sessionsBody");
+    const summariesBody = $("summariesBody");
+    const schedulesBody = $("schedulesBody");
+    const chart = $("chart");
     const ctx = chart.getContext("2d");
 
+    // ---------- Helfer ----------
+
+    function h(tag, props, ...children) {
+      const node = document.createElement(tag);
+
+      for (const [k, v] of Object.entries(props || {})) {
+        if (k === "class") node.className = v;
+        else if (k === "title") node.title = v;
+        else if (k === "onclick") node.addEventListener("click", v);
+        else node.setAttribute(k, v);
+      }
+
+      for (const c of children) {
+        if (c === null || c === undefined || c === false) continue;
+        node.append(c instanceof Node ? c : document.createTextNode(String(c)));
+      }
+
+      return node;
+    }
+
+    function num(v, digits = 2) {
+      const n = Number(v);
+      return Number.isFinite(n) ? n.toFixed(digits) : "–";
+    }
+
+    function shortId(id) {
+      return String(id).slice(0, 8);
+    }
+
+    function formatDuration(sec) {
+      const s = Math.max(0, Math.floor(Number(sec) || 0));
+      const hh = Math.floor(s / 3600);
+      const mm = Math.floor((s % 3600) / 60);
+      const ss = s % 60;
+      return `${hh}:${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
+    }
+
+    function formatStartup(ms) {
+      return ms > 0 ? (ms / 1000).toFixed(1) + " s" : "–";
+    }
+
+    function formatTime(ts) {
+      return ts ? new Date(ts).toLocaleString() : "–";
+    }
+
+    function showMsg(text, isError) {
+      msgEl.classList.toggle("danger", !!isError);
+      msgEl.textContent = text;
+    }
+
+    async function api(path, opts = {}) {
+      const headers = { "X-TB-Token": TOKEN };
+
+      if (opts.body !== undefined) headers["Content-Type"] = "application/json";
+
+      let res;
+
+      try {
+        res = await fetch(path, { ...opts, headers });
+      } catch {
+        return { ok: false, status: 0, data: { error: "Core nicht erreichbar." } };
+      }
+
+      let data = null;
+
+      try {
+        data = await res.json();
+      } catch {
+        // z. B. leere Antwort
+      }
+
+      return { ok: res.ok && data?.ok !== false, status: res.status, data: data ?? {} };
+    }
+
+    async function download(path, filename) {
+      let res;
+
+      try {
+        res = await fetch(path, { headers: { "X-TB-Token": TOKEN } });
+      } catch {
+        showMsg("Export fehlgeschlagen: Core nicht erreichbar.", true);
+        return;
+      }
+
+      if (!res.ok) {
+        showMsg(res.status === 404 ? "Noch keine Daten zum Exportieren." : `Export fehlgeschlagen (${res.status}).`, true);
+        return;
+      }
+
+      const url = URL.createObjectURL(await res.blob());
+      const a = h("a", { href: url, download: filename });
+
+      document.body.append(a);
+      a.click();
+      a.remove();
+
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    }
+
+    // ---------- WebSocket (mit Wiederverbindung statt Seiten-Reload) ----------
+
+    let ws = null;
+    let retry = 0;
+
+    function setConn(text, bad) {
+      connEl.textContent = text;
+      connEl.classList.toggle("bad", !!bad);
+    }
+
     function connectWs() {
-      ws = new WebSocket(`ws://${location.host}/ws`);
+      const proto = location.protocol === "https:" ? "wss" : "ws";
+
+      ws = new WebSocket(`${proto}://${location.host}/ws?token=${encodeURIComponent(TOKEN)}`);
+
+      ws.onopen = () => {
+        retry = 0;
+        setConn("Verbunden mit dem Core.", false);
+        loadInitial();
+      };
 
       ws.onmessage = (ev) => {
-        const msg = JSON.parse(ev.data);
+        let msg;
+
+        try {
+          msg = JSON.parse(ev.data);
+        } catch {
+          return;
+        }
 
         if (msg.type === "sample") {
           handleSample(msg.data);
@@ -299,94 +462,319 @@
         } else if (msg.type === "error") {
           handleError(msg.data);
         } else if (msg.type === "status") {
-          if (msg.data.state === "stopped") {
-            sessions.delete(msg.data.sessionId);
-            latest.delete(msg.data.sessionId);
-            renderSessions();
-          }
+          handleStatus(msg.data);
         }
       };
 
-      // Core-Neustart (z. B. nach einem App-Update): Dashboard lädt neu,
-      // damit keine eingefrorenen Alt-Rows stehen bleiben.
       ws.onclose = () => {
-        msgEl.classList.add("danger");
-        msgEl.textContent = "Verbindung zum Core verloren – Dashboard wird neu geladen...";
-        setTimeout(() => location.reload(), 2000);
+        const wait = Math.min(15000, 1000 * 2 ** retry++);
+        setConn(`Verbindung zum Core getrennt – neuer Versuch in ${Math.round(wait / 1000)} s…`, true);
+        setTimeout(connectWs, wait);
+      };
+
+      ws.onerror = () => {
+        try { ws.close(); } catch {}
       };
     }
 
-    connectWs();
+    // ---------- Ereignisse ----------
 
-    document.getElementById("sessionForm").onsubmit = async (e) => {
-      e.preventDefault();
+    function handleStatus(data) {
+      if (data.state === "stopped") {
+        sessions.delete(data.sessionId);
+      } else if (!sessions.has(data.sessionId)) {
+        sessions.set(data.sessionId, { sessionId: data.sessionId, state: data.state, ts: Date.now() });
+      }
 
-      const fd = new FormData(e.currentTarget);
-      const minutes = fd.get("minutes");
+      renderSessions();
+      updateStats();
+    }
 
-      const body = {
-        url: fd.get("url"),
-        kind: fd.get("kind"),
-        quality: fd.get("quality"),
-        humanize: fd.get("humanize") === "on",
-        repeat: fd.get("repeat") === "on",
-        maxRuntimeSec: minutes ? Number(minutes) * 60 : undefined,
-      };
+    function handleError(data) {
+      const { sessionId, message } = data ?? {};
 
-      const r = await fetch(API + "/api/sessions", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
-      });
-
-      const j = await r.json();
-      msgEl.classList.toggle("danger", !j.ok);
-      msgEl.textContent = j.ok
-        ? `Session gestartet: ${j.id} (${j.kind})`
-        : `Fehler: ${j.error}`;
-
-      if (j.ok) {
-        addRecentUrl(String(fd.get("url") ?? "").trim());
-        sessions.set(j.id, { sessionId: j.id, state: "starting" });
+      if (sessionId && sessions.has(sessionId)) {
+        sessions.set(sessionId, {
+          ...sessions.get(sessionId),
+          state: "error",
+          note: message,
+          ts: Date.now(),
+        });
         renderSessions();
       }
-    };
 
-    document.getElementById("scheduleForm").onsubmit = async (e) => {
+      showMsg(`Fehler ${sessionId ? shortId(sessionId) : "?"}: ${message ?? "unbekannt"}`, true);
+    }
+
+    function handleSample(s) {
+      sessions.set(s.sessionId, s);
+
+      // CPU/RAM gelten für den ganzen Browser (alle Sessions) – der neueste Wert genügt.
+      if (s.ts >= browserLoad.ts) {
+        browserLoad = { cpu: s.cpuPercent, ram: s.ramMb, ts: s.ts };
+      }
+
+      renderSessions();
+      updateStats();
+    }
+
+    function freshSessions() {
+      const now = Date.now();
+      return [...sessions.values()].filter((s) => !s.ts || now - s.ts < FRESH_MS);
+    }
+
+    function updateStats() {
+      const live = freshSessions();
+      const bw = live.reduce((sum, s) => sum + (Number(s.bandwidthMBps) || 0), 0);
+      const idle = sessions.size === 0;
+
+      totalBwEl.textContent = num(bw) + " MB/s";
+      cpuEl.textContent = (idle ? 0 : browserLoad.cpu).toFixed(1) + " %";
+      ramEl.textContent = (idle ? 0 : browserLoad.ram).toFixed(0) + " MB";
+      activeCountEl.textContent = maxSessions ? `${sessions.size} / ${maxSessions}` : String(sessions.size);
+    }
+
+    // Ein Messpunkt pro Sekunde für das Diagramm.
+    setInterval(() => {
+      const bw = freshSessions().reduce((sum, s) => sum + (Number(s.bandwidthMBps) || 0), 0);
+
+      history.push(bw);
+      if (history.length > MAX_HISTORY) history.shift();
+
+      drawChart();
+      updateStats();
+    }, 1000);
+
+    // ---------- Diagramm ----------
+
+    function drawChart() {
+      const dpr = window.devicePixelRatio || 1;
+      const rect = chart.getBoundingClientRect();
+      const w = Math.max(1, Math.round(rect.width * dpr));
+      const hgt = Math.max(1, Math.round(rect.height * dpr));
+
+      if (chart.width !== w || chart.height !== hgt) {
+        chart.width = w;
+        chart.height = hgt;
+      }
+
+      ctx.clearRect(0, 0, w, hgt);
+
+      if (history.length < 2) return;
+
+      const max = Math.max(1, ...history);
+      const pad = 8 * dpr;
+
+      ctx.strokeStyle = "#4af";
+      ctx.lineWidth = 2 * dpr;
+      ctx.beginPath();
+
+      history.forEach((v, i) => {
+        // Neuester Wert rechts, ältere Werte laufen nach links heraus.
+        const x = w - ((history.length - 1 - i) / (MAX_HISTORY - 1)) * w;
+        const y = hgt - (v / max) * (hgt - 2 * pad) - pad;
+
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+
+      ctx.stroke();
+
+      ctx.fillStyle = "#aaa";
+      ctx.font = `${12 * dpr}px system-ui`;
+      ctx.fillText(`max ${max.toFixed(2)} MB/s · letzte ${Math.round(MAX_HISTORY / 60)} Minuten`, 8 * dpr, 16 * dpr);
+    }
+
+    // ---------- Tabellen ----------
+
+    function emptyRow(tbody, cols, text) {
+      tbody.replaceChildren(h("tr", {}, h("td", { colspan: String(cols), class: "empty" }, text)));
+    }
+
+    function renderSessions() {
+      if (sessions.size === 0) {
+        emptyRow(sessionsBody, 10, "Keine aktive Session.");
+        return;
+      }
+
+      const rows = [];
+
+      for (const s of sessions.values()) {
+        const stale = !!s.ts && Date.now() - s.ts > STALE_AFTER_MS;
+        const bad = ["error", "blocked", "no_video", "not_playing"].includes(s.state);
+
+        rows.push(
+          h(
+            "tr",
+            {},
+            h("td", { title: s.sessionId }, shortId(s.sessionId)),
+            h("td", {}, s.kind ?? ""),
+            h("td", { class: bad ? "danger" : "" }, s.state ?? "", stale ? h("span", { class: "muted" }, " (keine Updates)") : null),
+            h("td", {}, s.quality ?? ""),
+            h("td", { class: "num-cell" }, num(s.bandwidthMBps)),
+            h("td", { class: "num-cell" }, num(s.bufferedSec, 1) + " s"),
+            h("td", { class: "num-cell" }, `${s.stalls ?? 0} (${num(s.stallSec, 1)} s)`),
+            h("td", { class: "num-cell" }, formatStartup(s.startupMs)),
+            h("td", { class: "muted" }, s.note ?? ""),
+            h("td", {}, h("button", { type: "button", onclick: () => stopSession(s.sessionId) }, "Stop"))
+          )
+        );
+      }
+
+      sessionsBody.replaceChildren(...rows);
+    }
+
+    function renderSummaries() {
+      const list = [...summaries.values()].sort((a, b) => b.finishedAt - a.finishedAt);
+
+      if (list.length === 0) {
+        emptyRow(summariesBody, 13, "Noch keine abgeschlossene Session.");
+        return;
+      }
+
+      summariesBody.replaceChildren(
+        ...list.map((s) =>
+          h(
+            "tr",
+            {},
+            h("td", { title: s.sessionId }, shortId(s.sessionId)),
+            h("td", { class: "num-cell" }, formatDuration(s.runtimeSec)),
+            h("td", { class: "num-cell" }, num(s.avgBandwidthMBps)),
+            h("td", { class: "num-cell" }, num(s.peakBandwidthMBps)),
+            h("td", { class: "num-cell" }, num(s.p95BandwidthMBps)),
+            h("td", { class: "num-cell" }, s.stalls),
+            h("td", { class: "num-cell" }, num(s.stallSeconds, 1)),
+            h("td", { class: "num-cell" }, num((s.rebufferRatio ?? 0) * 100, 2) + " %"),
+            h("td", { class: "num-cell" }, formatStartup(s.startupMs)),
+            h("td", {}, s.dominantQuality),
+            h("td", { class: "num-cell" }, num((s.droppedFrameRatio ?? 0) * 100, 2) + " %"),
+            h("td", { class: ["error", "blocked"].includes(s.endReason) ? "danger" : "" }, s.endReason ?? ""),
+            h("td", { class: "muted" }, s.note ?? "")
+          )
+        )
+      );
+    }
+
+    function renderSchedules() {
+      const list = [...schedules.values()];
+
+      if (list.length === 0) {
+        emptyRow(schedulesBody, 7, "Keine Zeitpläne.");
+        return;
+      }
+
+      schedulesBody.replaceChildren(
+        ...list.map((s) =>
+          h(
+            "tr",
+            {},
+            h("td", { class: "num-cell" }, s.cron),
+            h("td", { class: "url-cell" }, s.session.url),
+            h("td", { class: s.enabled ? "ok" : "muted" }, s.enabled ? "aktiv" : "pausiert"),
+            h("td", { class: "num-cell" }, s.enabled ? formatTime(s.nextRun) : "–"),
+            h("td", { class: "num-cell" }, formatTime(s.lastRun)),
+            h("td", { class: s.lastError ? "danger" : "muted" }, s.lastError ?? ""),
+            h(
+              "td",
+              {},
+              h("button", { type: "button", onclick: () => toggleSchedule(s) }, s.enabled ? "Pausieren" : "Aktivieren"),
+              h("button", { type: "button", onclick: () => deleteSchedule(s.id) }, "Löschen")
+            )
+          )
+        )
+      );
+    }
+
+    // ---------- Aktionen ----------
+
+    function sessionBody(fd) {
+      const body = {
+        url: String(fd.get("url") ?? "").trim(),
+        quality: fd.get("quality"),
+        repeat: fd.get("repeat") === "on",
+      };
+
+      if (fd.has("kind")) body.kind = fd.get("kind");
+
+      const minutes = fd.get("minutes");
+      const loops = fd.get("loops");
+
+      if (minutes) body.maxRuntimeSec = Math.round(Number(minutes) * 60);
+      if (loops) body.maxLoops = Number(loops);
+
+      return body;
+    }
+
+    $("sessionForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+
+      const body = sessionBody(new FormData(e.currentTarget));
+      const r = await api("/api/sessions", { method: "POST", body: JSON.stringify(body) });
+
+      if (!r.ok) {
+        showMsg(`Fehler: ${r.data.error ?? "Start fehlgeschlagen (" + r.status + ")"}`, true);
+        return;
+      }
+
+      showMsg(`Session gestartet: ${shortId(r.data.id)} (${r.data.kind})`, false);
+      addRecentUrl(body.url);
+
+      sessions.set(r.data.id, { sessionId: r.data.id, state: "starting", kind: r.data.kind, ts: Date.now() });
+      renderSessions();
+      updateStats();
+    });
+
+    $("scheduleForm").addEventListener("submit", async (e) => {
       e.preventDefault();
 
       const fd = new FormData(e.currentTarget);
-      const minutes = fd.get("minutes");
+      const body = { cron: String(fd.get("cron") ?? "").trim(), enabled: true, session: sessionBody(fd) };
 
-      const body = {
-        cron: fd.get("cron"),
-        enabled: true,
-        session: {
-          url: fd.get("url"),
-          quality: fd.get("quality"),
-          humanize: fd.get("humanize") === "on",
-          repeat: fd.get("repeat") === "on",
-          maxRuntimeSec: minutes ? Number(minutes) * 60 : undefined,
-        },
-      };
+      const r = await api("/api/schedules", { method: "POST", body: JSON.stringify(body) });
 
-      const r = await fetch(API + "/api/schedules", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
+      if (!r.ok) {
+        showMsg(`Fehler: ${r.data.error ?? "Zeitplan konnte nicht angelegt werden (" + r.status + ")"}`, true);
+        return;
+      }
+
+      showMsg("Zeitplan hinzugefügt.", false);
+      schedules.set(r.data.schedule.id, r.data.schedule);
+      renderSchedules();
+    });
+
+    $("exportSamples").addEventListener("click", () => download("/export/samples.csv", "tubeload-samples.csv"));
+    $("exportSummaries").addEventListener("click", () => download("/export/summaries.csv", "tubeload-summaries.csv"));
+
+    async function stopSession(id) {
+      const r = await api(`/api/sessions/${encodeURIComponent(id)}`, { method: "DELETE" });
+
+      showMsg(r.ok ? `Session gestoppt: ${shortId(id)}` : `Stoppen fehlgeschlagen (${r.status}).`, !r.ok);
+    }
+
+    async function toggleSchedule(s) {
+      const r = await api(`/api/schedules/${encodeURIComponent(s.id)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ enabled: !s.enabled }),
       });
 
-      const j = await r.json();
-      msgEl.classList.toggle("danger", !j.ok);
-      msgEl.textContent = j.ok
-        ? `Schedule hinzugefügt: ${j.schedule.id}`
-        : `Fehler: ${j.error}`;
-
-      if (j.ok) {
-        schedules.set(j.schedule.id, j.schedule);
+      if (r.ok && r.data.schedule) {
+        schedules.set(s.id, r.data.schedule);
         renderSchedules();
+      } else {
+        showMsg(`Änderung fehlgeschlagen: ${r.data.error ?? r.status}`, true);
       }
-    };
+    }
+
+    async function deleteSchedule(id) {
+      const r = await api(`/api/schedules/${encodeURIComponent(id)}`, { method: "DELETE" });
+
+      if (r.ok) {
+        schedules.delete(id);
+        renderSchedules();
+      } else {
+        showMsg(`Löschen fehlgeschlagen (${r.status}).`, true);
+      }
+    }
 
     // ---------- URL-Verlauf ----------
 
@@ -400,18 +788,10 @@
     }
 
     function renderRecentUrls() {
-      const list = getRecentUrls();
-
-      recentUrlsEl.innerHTML =
-        '<option value="">Letzte URLs…</option>' +
-        list
-          .map(
-            (u) =>
-              `<option value="${escapeHtml(u)}">${escapeHtml(
-                u.length > 70 ? u.slice(0, 67) + "…" : u
-              )}</option>`
-          )
-          .join("");
+      recentUrlsEl.replaceChildren(
+        h("option", { value: "" }, "Letzte URLs…"),
+        ...getRecentUrls().map((u) => h("option", { value: u }, u.length > 70 ? u.slice(0, 67) + "…" : u))
+      );
 
       recentUrlsEl.value = "";
     }
@@ -423,227 +803,77 @@
 
       try {
         localStorage.setItem(RECENT_KEY, JSON.stringify(list.slice(0, RECENT_MAX)));
-      } catch {}
+      } catch {
+        // Speicher nicht verfügbar – der Verlauf ist nur eine Bequemlichkeit.
+      }
 
       renderRecentUrls();
     }
 
-    recentUrlsEl.onchange = () => {
+    recentUrlsEl.addEventListener("change", () => {
       if (recentUrlsEl.value) {
-        document.querySelector('#sessionForm input[name="url"]').value =
-          recentUrlsEl.value;
+        document.querySelector('#sessionForm input[name="url"]').value = recentUrlsEl.value;
       }
-    };
+    });
 
-    // ---------- Fehler + Samples ----------
-
-    function handleError(data) {
-      const { sessionId, message } = data ?? {};
-
-      if (sessionId && sessions.has(sessionId)) {
-        const prev = sessions.get(sessionId);
-        sessions.set(sessionId, {
-          ...prev,
-          state: "error",
-          note: message,
-        });
-        renderSessions();
-      }
-
-      msgEl.classList.add("danger");
-      msgEl.textContent =
-        `Fehler ${sessionId ? shortId(sessionId) : "?"}: ${message ?? "unbekannt"}`;
-    }
-
-    function handleSample(s) {
-      latest.set(s.sessionId, s);
-      sessions.set(s.sessionId, s);
-
-      const totalBw = [...latest.values()].reduce((sum, x) => sum + x.bandwidthMBps, 0);
-      const last = [...latest.values()].at(-1);
-
-      totalBwEl.textContent = totalBw.toFixed(2) + " MB/s";
-      cpuEl.textContent = (last?.cpuPercent ?? 0).toFixed(1) + " %";
-      ramEl.textContent = (last?.ramMb ?? 0).toFixed(0) + " MB";
-      activeCountEl.textContent = String(latest.size);
-
-      history.push(totalBw);
-      if (history.length > MAX_HISTORY) history.shift();
-
-      drawChart();
-      renderSessions();
-    }
-
-    function drawChart() {
-      ctx.clearRect(0, 0, chart.width, chart.height);
-
-      if (history.length < 2) return;
-
-      const max = Math.max(1, ...history);
-
-      ctx.strokeStyle = "#4af";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-
-      history.forEach((v, i) => {
-        const x = (i / (history.length - 1)) * chart.width;
-        const y = chart.height - (v / max) * (chart.height - 12) - 6;
-
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-      });
-
-      ctx.stroke();
-
-      ctx.fillStyle = "#aaa";
-      ctx.font = "12px system-ui";
-      ctx.fillText(`max ${max.toFixed(2)} MB/s`, 8, 16);
-    }
-
-    function renderSessions() {
-      sessionsBody.innerHTML = "";
-
-      for (const s of sessions.values()) {
-        const stale = !!s.ts && Date.now() - s.ts > STALE_AFTER_MS;
-        const badState = ["error", "blocked", "no_video", "not_playing"].includes(
-          s.state
-        );
-
-        const tr = document.createElement("tr");
-
-        tr.innerHTML = `
-          <td title="${escapeHtml(s.sessionId)}">${escapeHtml(shortId(s.sessionId))}</td>
-          <td>${escapeHtml(s.kind ?? "")}</td>
-          <td class="${badState ? "danger" : ""}">${escapeHtml(s.state ?? "")}${stale ? ' <span class="muted">(keine Updates)</span>' : ""}</td>
-          <td>${escapeHtml(s.quality ?? "")}</td>
-          <td>${(s.bandwidthMBps ?? 0).toFixed(2)}</td>
-          <td>${(s.bufferedSec ?? 0).toFixed(1)}s</td>
-          <td>${s.stalls ?? 0}</td>
-          <td class="muted">${escapeHtml(s.note ?? "")}</td>
-          <td><button data-stop="${escapeHtml(s.sessionId)}">Stop</button></td>
-        `;
-
-        sessionsBody.appendChild(tr);
-      }
-
-      sessionsBody.querySelectorAll("button[data-stop]").forEach((btn) => {
-        btn.onclick = () => stopSession(btn.getAttribute("data-stop"));
-      });
-    }
-
-    function renderSummaries() {
-      summariesBody.innerHTML = "";
-
-      for (const s of [...summaries.values()].reverse()) {
-        const tr = document.createElement("tr");
-
-        tr.innerHTML = `
-          <td title="${escapeHtml(s.sessionId)}">${escapeHtml(shortId(s.sessionId))}</td>
-          <td>${formatDuration(s.runtimeSec)}</td>
-          <td>${s.avgBandwidthMBps.toFixed(2)}</td>
-          <td>${s.peakBandwidthMBps.toFixed(2)}</td>
-          <td>${s.p95BandwidthMBps.toFixed(2)}</td>
-          <td>${s.stalls}</td>
-          <td>${s.stallSeconds.toFixed(1)}</td>
-          <td>${escapeHtml(s.dominantQuality)}</td>
-          <td>${(s.droppedFrameRatio * 100).toFixed(2)}%</td>
-        `;
-
-        summariesBody.appendChild(tr);
-      }
-    }
-
-    function renderSchedules() {
-      schedulesBody.innerHTML = "";
-
-      for (const s of schedules.values()) {
-        const tr = document.createElement("tr");
-
-        tr.innerHTML = `
-          <td>${escapeHtml(s.cron)}</td>
-          <td>${escapeHtml(s.session.url)}</td>
-          <td>${s.nextRun ? new Date(s.nextRun).toLocaleString() : "-"}</td>
-          <td>${s.lastRun ? new Date(s.lastRun).toLocaleString() : "-"}</td>
-          <td><button data-del="${escapeHtml(s.id)}">Löschen</button></td>
-        `;
-
-        schedulesBody.appendChild(tr);
-      }
-
-      schedulesBody.querySelectorAll("button[data-del]").forEach((btn) => {
-        btn.onclick = () => deleteSchedule(btn.getAttribute("data-del"));
-      });
-    }
-
-    async function stopSession(id) {
-      await fetch(`${API}/api/sessions/${encodeURIComponent(id)}`, {
-        method: "DELETE",
-      });
-
-      msgEl.classList.remove("danger");
-      msgEl.textContent = "Session gestoppt: " + id;
-    }
-
-    async function deleteSchedule(id) {
-      await fetch(`${API}/api/schedules/${encodeURIComponent(id)}`, {
-        method: "DELETE",
-      });
-
-      schedules.delete(id);
-      renderSchedules();
-    }
+    // ---------- Start ----------
 
     async function loadInitial() {
-      try {
-        const [sumRes, schRes] = await Promise.all([
-          fetch(API + "/api/summaries"),
-          fetch(API + "/api/schedules"),
-        ]);
+      const [sum, sch, ses] = await Promise.all([
+        api("/api/summaries"),
+        api("/api/schedules"),
+        api("/api/sessions"),
+      ]);
 
-        const sumJson = await sumRes.json();
-        const schJson = await schRes.json();
-
-        for (const s of sumJson.summaries ?? []) {
-          summaries.set(s.sessionId, s);
-        }
-
-        for (const s of schJson.schedules ?? []) {
-          schedules.set(s.id, s);
-        }
-
-        renderSummaries();
-        renderSchedules();
-      } catch (e) {
-        console.error(e);
+      if (sum.ok) {
+        summaries.clear();
+        for (const s of sum.data.summaries ?? []) summaries.set(s.sessionId, s);
       }
+
+      if (sch.ok) {
+        schedules.clear();
+        for (const s of sch.data.schedules ?? []) schedules.set(s.id, s);
+      }
+
+      if (ses.ok) {
+        maxSessions = ses.data.max ?? null;
+
+        // Läuft nach einer Wiederverbindung noch eine Session, die wir nicht kennen?
+        for (const id of ses.data.ids ?? []) {
+          if (!sessions.has(id)) sessions.set(id, { sessionId: id, state: "starting", ts: Date.now() });
+        }
+
+        // Sessions, die inzwischen beendet sind, entfernen.
+        const alive = new Set(ses.data.ids ?? []);
+        for (const id of [...sessions.keys()]) if (!alive.has(id)) sessions.delete(id);
+      }
+
+      renderSummaries();
+      renderSchedules();
+      renderSessions();
+      updateStats();
     }
 
-    function shortId(id) {
-      return String(id).slice(0, 8);
-    }
+    // Zeitpläne ändern sich serverseitig (Lauf/Fehler) – regelmäßig auffrischen.
+    setInterval(async () => {
+      const r = await api("/api/schedules");
 
-    function formatDuration(sec) {
-      const s = Math.max(0, Math.floor(sec));
-      const h = Math.floor(s / 3600);
-      const m = Math.floor((s % 3600) / 60);
-      const ss = s % 60;
-      return `${h}:${String(m).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
-    }
+      if (r.ok) {
+        schedules.clear();
+        for (const s of r.data.schedules ?? []) schedules.set(s.id, s);
+        renderSchedules();
+      }
+    }, 30000);
 
-    function escapeHtml(v) {
-      return String(v ?? "")
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#039;");
-    }
-
-    loadInitial();
-    renderRecentUrls();
-
-    // Regelmäßig neu rendern, damit Stale-Markierungen aktuell bleiben.
+    // Stale-Markierungen aktuell halten.
     setInterval(renderSessions, 10000);
+
+    renderRecentUrls();
+    renderSessions();
+    renderSummaries();
+    renderSchedules();
+    connectWs();
+    window.addEventListener("resize", drawChart);
   </script>
 </body>
 </html>
