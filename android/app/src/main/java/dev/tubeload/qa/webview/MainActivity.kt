@@ -16,6 +16,8 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.ArrayAdapter
+import android.widget.AutoCompleteTextView
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
@@ -25,6 +27,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
+import org.json.JSONArray
 import org.json.JSONObject
 
 /** Host, unter dem die lokale player.html ausgeliefert wird (https statt file://). */
@@ -42,18 +45,35 @@ private val ALLOWED_HOSTS = setOf(
     "youtu.be"
 )
 
-/** Begrenzungen: ein Test ist eine zeitlich und in Wiederholungen beschränkte Messung. */
+/**
+ * Begrenzungen: ein Test ist eine zeitlich und in Wiederholungen beschränkte Messung.
+ * Standardwerte gelten, wenn das Feld leer ist; die Maxima sind feste Obergrenzen
+ * (player.html erzwingt sie zusätzlich).
+ */
 private const val DEFAULT_MINUTES = 30
 private const val MAX_MINUTES = 240
-private const val MAX_LOOPS = 3
+private const val DEFAULT_LOOPS = 3
+private const val MAX_LOOPS = 10
+
+/** Dauerhaft gespeicherte Eingaben (überleben das Schließen der App). */
+private const val PREFS = "tubeload_qa"
+private const val PREF_RECENT = "recent_urls"
+private const val PREF_MINUTES = "minutes"
+private const val PREF_LOOPS = "loops"
+private const val PREF_REPEAT = "repeat"
+private const val MAX_RECENT_URLS = 20
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var web: WebView
     private lateinit var status: TextView
-    private lateinit var urlInput: EditText
+    private lateinit var urlInput: AutoCompleteTextView
     private lateinit var minutesInput: EditText
+    private lateinit var loopsInput: EditText
     private lateinit var repeatCheck: CheckBox
+    private lateinit var urlAdapter: ArrayAdapter<String>
+
+    private val prefs by lazy { getSharedPreferences(PREFS, MODE_PRIVATE) }
 
     private var pendingConfig: String? = null
 
@@ -80,7 +100,10 @@ class MainActivity : AppCompatActivity() {
         status = findViewById(R.id.status)
         urlInput = findViewById(R.id.url)
         minutesInput = findViewById(R.id.minutes)
+        loopsInput = findViewById(R.id.loops)
         repeatCheck = findViewById(R.id.repeat)
+
+        restoreSavedInputs()
 
         web.settings.apply {
             javaScriptEnabled = true
@@ -191,6 +214,102 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.stop).setOnClickListener {
             web.evaluateJavascript("window.stopPlayback && window.stopPlayback()", null)
         }
+    }
+
+    // ---------- Gespeicherte Eingaben ----------
+
+    /** Gespeicherte URLs, neueste zuerst. Ungültige Einträge werden aussortiert. */
+    private fun loadRecentUrls(): MutableList<String> {
+        val out = mutableListOf<String>()
+
+        try {
+            val arr = JSONArray(prefs.getString(PREF_RECENT, "[]"))
+
+            for (i in 0 until arr.length()) {
+                val u = arr.optString(i, "")
+
+                if (u.isNotEmpty() && isAllowedUrl(u) && !out.contains(u)) out.add(u)
+            }
+        } catch (e: Exception) {
+            // Kaputte Einstellungsdatei: mit leerer Liste weitermachen.
+        }
+
+        return out
+    }
+
+    private fun rememberUrl(url: String) {
+        val list = loadRecentUrls()
+
+        list.remove(url)
+        list.add(0, url)
+
+        while (list.size > MAX_RECENT_URLS) list.removeAt(list.size - 1)
+
+        prefs.edit().putString(PREF_RECENT, JSONArray(list).toString()).apply()
+
+        urlAdapter.clear()
+        urlAdapter.addAll(list)
+        urlAdapter.notifyDataSetChanged()
+    }
+
+    /** Merkt die URL, sobald sie gueltig eingegeben ist – auch ohne Start. */
+    private fun rememberCurrentUrl() {
+        val url = urlInput.text.toString().trim()
+
+        if (url.isNotEmpty() && isAllowedUrl(url)) rememberUrl(url)
+    }
+
+    private fun saveInputs() {
+        rememberCurrentUrl()
+
+        val editor = prefs.edit()
+
+        minutesInput.text.toString().trim().toIntOrNull()
+            ?.let { editor.putInt(PREF_MINUTES, it.coerceIn(1, MAX_MINUTES)) }
+            ?: editor.remove(PREF_MINUTES)
+
+        loopsInput.text.toString().trim().toIntOrNull()
+            ?.let { editor.putInt(PREF_LOOPS, it.coerceIn(1, MAX_LOOPS)) }
+            ?: editor.remove(PREF_LOOPS)
+
+        editor.putBoolean(PREF_REPEAT, repeatCheck.isChecked).apply()
+    }
+
+    private fun restoreSavedInputs() {
+        val recent = loadRecentUrls()
+
+        urlAdapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, ArrayList(recent))
+        urlInput.setAdapter(urlAdapter)
+
+        // Die zuletzt verwendete URL steht beim Start wieder im Feld.
+        if (recent.isNotEmpty()) urlInput.setText(recent[0], false)
+
+        // Antippen bzw. Fokus zeigt alle gespeicherten URLs; beim Verlassen des Feldes wird gespeichert.
+        urlInput.setOnClickListener {
+            if (urlAdapter.count > 0) urlInput.showDropDown()
+        }
+
+        urlInput.setOnFocusChangeListener { _, hasFocus ->
+            if (hasFocus) {
+                urlInput.post { if (urlAdapter.count > 0) urlInput.showDropDown() }
+            } else {
+                rememberCurrentUrl()
+            }
+        }
+
+        val minutes = prefs.getInt(PREF_MINUTES, -1)
+        val loops = prefs.getInt(PREF_LOOPS, -1)
+
+        if (minutes > 0) minutesInput.setText(minutes.toString())
+        if (loops > 0) loopsInput.setText(loops.toString())
+
+        repeatCheck.isChecked = prefs.getBoolean(PREF_REPEAT, false)
+    }
+
+    override fun onPause() {
+        saveInputs()
+
+        super.onPause()
     }
 
     /**
@@ -322,6 +441,16 @@ class MainActivity : AppCompatActivity() {
             ?.coerceIn(1, MAX_MINUTES)
             ?: DEFAULT_MINUTES
 
+        val loops = loopsInput.text.toString().trim().toIntOrNull()
+            ?.coerceIn(1, MAX_LOOPS)
+            ?: DEFAULT_LOOPS
+
+        // Die Felder zeigen, was tatsaechlich gilt (z. B. nach Begrenzung auf das Maximum).
+        if (minutesInput.text.isNotBlank()) minutesInput.setText(minutes.toString())
+        if (loopsInput.text.isNotBlank()) loopsInput.setText(loops.toString())
+
+        saveInputs()
+
         // Consent-Status setzen, BEVOR der Embed geladen wird,
         // damit YouTube gar keine Consent-Wand zeigt.
         primeConsentCookies()
@@ -329,7 +458,7 @@ class MainActivity : AppCompatActivity() {
         val cfg = JSONObject()
             .put("url", url)
             .put("repeat", repeatCheck.isChecked)
-            .put("maxLoops", MAX_LOOPS)
+            .put("maxLoops", loops)
             .put("maxRuntimeSec", minutes * 60)
             .put("mute", true)
             .toString()

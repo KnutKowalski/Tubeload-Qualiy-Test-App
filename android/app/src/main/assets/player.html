@@ -197,9 +197,9 @@
         if (!player) return;
 
         try {
-          // Hinweis: Die Qualitäts-Funktionen der IFrame-API (getPlaybackQuality,
-          // setPlaybackQuality) sind seit 2019 abgekündigt; die App bietet deshalb
-          // keine Qualitätswahl an. Gemessen werden Zustand, Position und Puffer.
+          // Gemessen werden Zustand, Position und Puffer. Die Qualität wählt man im
+          // Zahnrad-Menü des Players (controls: 1); per IFrame-API lässt sie sich nicht
+          // setzen (setPlaybackQuality ist laut Google-Dokumentation seit 24.10.2019 wirkungslos).
           log({
             state: stateName(player.getPlayerState()),
             currentTime: player.getCurrentTime(),
@@ -337,7 +337,9 @@
 
       var playerVars = {
         autoplay: 1,
-        controls: 0,
+        // Eingeblendete Steuerelemente: darüber (Zahnrad) lässt sich die Qualität
+        // wie in der YouTube-App von Auto über 144p bis 1080p/4K wählen.
+        controls: 1,
         disablekb: 1,
         modestbranding: 1,
         playsinline: 1,

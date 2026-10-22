@@ -63,6 +63,13 @@ npm run dev         # gibt http://127.0.0.1:7777 aus; Token siehe unten
 
 - **Session starten:** YouTube-Video-, Playlist- oder Kanal-URL eintragen, optional Auflösung,
   Laufzeit in Minuten und Wiederholungen wählen, *Start*.
+- **Gespeicherte URLs:** Jede eingegebene (gültige) URL wird sofort dauerhaft gespeichert – beim
+  Verlassen des Feldes, beim Start und beim Anlegen eines Zeitplans, auch wenn der Start am Limit
+  scheitert. Sie erscheinen als Vorschlag im Eingabefeld und in der Liste *Gespeicherte URLs*
+  (*URL entfernen* löscht den gewählten Eintrag). Es werden bis zu 50 URLs gemerkt.
+- **Einstellungen:** Im Abschnitt *Einstellungen* des Dashboards lassen sich parallele Sessions,
+  Standard-Läufe, Standard-Laufzeit und der Mindestabstand der Zeitplan-Läufe ändern
+  (siehe [Grenzwerte](#grenzwerte)).
 - **Scheduler:** Cron-Ausdruck (z. B. `0 2 * * *`) plus Session-Einstellungen. Zeitpläne lassen
   sich ein- und ausschalten. Läuft der vorherige Lauf eines Plans noch, wird der nächste
   übersprungen.
@@ -74,13 +81,20 @@ Startzeit bis zum ersten Bild, Stalls (Anzahl, Dauer, Rebuffer-Anteil – Seeks 
 zählen nicht), Bandbreite (Ø, Peak, P95), Puffer, **tatsächliche Auflösung** (`videoWidth`×`videoHeight`),
 verworfene Frames sowie CPU/RAM aller Browser-Prozesse (100 % = ein Kern).
 
-Die Auflösung wird über die Fenstergröße und das Einstellungsmenü angefordert. YouTube kann davon
-abweichen (die Qualitäts-API des Players ist seit 2019 abgekündigt); gewertet wird deshalb immer
-die **gemessene** Auflösung. Playlists und Kanäle werden Video für Video abgespielt; ein
+Die Auflösung wird über die Fenstergröße und das Einstellungsmenü des Players angefordert. YouTube
+kann davon abweichen (Auto-Qualität, Gerät, Netz); gewertet wird deshalb immer die **gemessene**
+Auflösung. Playlists und Kanäle werden Video für Video abgespielt; ein
 „Durchlauf“ ist beendet, wenn das letzte Video zu Ende ist.
 
 Die **Android-App** kann nur das messen, was die IFrame-API liefert (Zustand, Position, Puffer);
 Auflösung, Bandbreite und Stall-Dauer stehen dort nicht zur Verfügung.
+
+**Qualität auf Android:** Der eingebettete Player zeigt seine Steuerelemente; über das Zahnrad lässt
+sich die Qualität wie in der YouTube-App wählen (Auto, 144p bis 1080p, 4K – je nach Video und
+Gerät). Per Programm lässt sie sich über die IFrame-API nicht setzen: `setPlaybackQuality` ist laut
+Google-Dokumentation seit dem 24.10.2019 wirkungslos. Die App bietet deshalb keine eigene
+Auswahlliste an, sondern nutzt die des Players. Eingaben (URL, Minuten, Läufe, *Wiederholen*) und
+die zuletzt verwendeten URLs (Liste per Antippen des URL-Feldes) bleiben nach dem Schließen erhalten.
 
 ## Sicherheit
 
@@ -99,14 +113,22 @@ Sicherheitsprobleme bitte per GitHub-Issue (ohne Exploit-Details) oder direkt an
 
 ## Grenzwerte
 
-| Einstellung | Standard | Maximum |
+Die Werte der ersten vier Zeilen lassen sich im Dashboard unter *Einstellungen* ändern. Sie gelten
+für neue Sessions und Zeitpläne (laufende Sessions ändern sich nicht), werden in `settings.json`
+gespeichert und bleiben nach einem Neustart erhalten. *Zurücksetzen* stellt die Standardwerte
+wieder her. Die **festen Obergrenzen** schützen den Rechner und lassen sich nicht überschreiten.
+
+| Einstellung | Standard | Einstellbar von … bis (feste Obergrenze) |
 | --- | --- | --- |
-| Parallele Sessions | 3 (`TB_MAX_SESSIONS`) | 10 |
-| Wiederholungen („Läufe“) | 3 (nur wenn *Wiederholen* aktiv) | 10 |
-| Laufzeit pro Session | 30 min | 4 h |
-| Abstand zwischen Zeitplan-Läufen | – | mind. 5 min |
-| Zeitpläne | – | 50 |
-| Android: Wiederholungen / Laufzeit | – | 3 / 4 h |
+| Parallele Sessions | 3 (Startwert per `TB_MAX_SESSIONS`) | 1 – 10 |
+| Wiederholungen („Läufe“) | 3 (nur wenn *Wiederholen* aktiv) | 1 – 10 |
+| Laufzeit pro Session | 30 min | 1 – 240 min |
+| Mindestabstand zwischen Zeitplan-Läufen | 5 min | 1 – 60 min |
+| Zeitpläne | – | 50 (fest) |
+| Android: Wiederholungen / Laufzeit | 3 / 30 min (Felder in der App) | 1 – 10 / 1 – 240 min |
+
+Zeitpläne dürfen nie häufiger als im Minutentakt laufen (Sekunden-Crons werden abgelehnt). Wird der
+Mindestabstand später erhöht, bleiben bestehende Zeitpläne erhalten; er gilt für neue.
 
 ## Konfiguration (Umgebungsvariablen des Cores)
 
@@ -116,12 +138,14 @@ Sicherheitsprobleme bitte per GitHub-Issue (ohne Exploit-Details) oder direkt an
 | `TB_TOKEN` | Eigenes API-Token (mind. 16 Zeichen). Ohne Angabe wird pro Start ein zufälliges erzeugt. |
 | `TB_CHROME_PATH` | Pfad zu Chrome/Chromium/Edge. |
 | `TB_HEADLESS` | `0` zeigt das Browserfenster (Fehlersuche). |
-| `TB_DATA_DIR` | Datenordner (`samples.csv`, `summaries.json`, `schedules.json`). |
-| `TB_MAX_SESSIONS` | Parallele Sessions (1–10). |
+| `TB_DATA_DIR` | Datenordner (`samples.csv`, `summaries.json`, `schedules.json`, `settings.json`, `recent-urls.json`). |
+| `TB_MAX_SESSIONS` | Startwert für parallele Sessions (1–10); der Wert in den Einstellungen hat Vorrang, sobald er gespeichert wurde. |
 | `TB_LOG_LEVEL` | `debug`, `info`, `warn`, `error`. |
 
-`samples.csv` wird ab einer Größe von 50 MB rotiert; die Zusammenfassungen und Zeitpläne bleiben
-über Neustarts erhalten.
+`samples.csv` wird ab einer Größe von 50 MB rotiert; Zusammenfassungen, Zeitpläne, Einstellungen und
+gespeicherte URLs bleiben über Neustarts erhalten. (Die URLs liegen bewusst im Datenordner und nicht im
+Browser-Speicher des Dashboards: der gilt pro Adresse samt Port, und Electron startet auf einem
+anderen Port.)
 
 ## Bekannte Grenzen
 
