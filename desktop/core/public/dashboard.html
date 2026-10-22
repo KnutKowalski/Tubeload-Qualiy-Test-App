@@ -120,6 +120,11 @@
     #conn.bad { color: var(--danger); }
 
     .note { color: var(--muted); font-size: 13px; max-width: 900px; }
+
+    .setting { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; margin: 3px 8px 3px 0; }
+    .setting span { font-size: 12px; color: var(--muted); }
+    .setting input { margin: 0; }
+    .row-end { align-self: flex-end; }
   </style>
 </head>
 <body>
@@ -135,11 +140,13 @@
   <h2>Session starten</h2>
 
   <form id="sessionForm" class="row">
-    <input class="url" name="url" aria-label="YouTube-URL" placeholder="YouTube Video-, Playlist- oder Kanal-URL" required maxlength="2048" />
+    <input class="url" name="url" list="recentList" autocomplete="off" aria-label="YouTube-URL" placeholder="YouTube Video-, Playlist- oder Kanal-URL" required maxlength="2048" />
 
-    <select id="recentUrls" aria-label="Zuletzt verwendete URLs" title="Zuletzt verwendete URLs">
-      <option value="">Letzte URLs…</option>
+    <select id="recentUrls" aria-label="Gespeicherte URLs" title="Gespeicherte URLs (bleiben nach dem Schließen der App erhalten)">
+      <option value="">Gespeicherte URLs…</option>
     </select>
+    <button type="button" id="removeRecent" title="Die oben gewählte gespeicherte URL aus der Liste entfernen">URL entfernen</button>
+    <datalist id="recentList"></datalist>
 
     <select name="kind" aria-label="Typ">
       <option value="auto">Typ: automatisch</option>
@@ -160,10 +167,10 @@
       <option value="2160p">2160p</option>
     </select>
 
-    <input class="num" name="minutes" type="number" min="1" max="240" step="1" aria-label="Maximale Laufzeit in Minuten" placeholder="Min. (30)" />
+    <input class="num" name="minutes" type="number" min="1" max="240" step="1" aria-label="Maximale Laufzeit in Minuten" placeholder="Min. (30)" data-ph="minutes" />
 
     <label><input type="checkbox" name="repeat" /> Wiederholen</label>
-    <input class="num" name="loops" type="number" min="1" max="10" step="1" aria-label="Durchläufe (höchstens 10)" placeholder="Läufe (3)" />
+    <input class="num" name="loops" type="number" min="1" max="10" step="1" aria-label="Durchläufe (höchstens 10)" placeholder="Läufe (3)" data-ph="loops" />
 
     <button class="primary" type="submit">Start</button>
     <button type="button" id="exportSamples">Samples CSV</button>
@@ -246,7 +253,7 @@
 
   <form id="scheduleForm" class="row">
     <input class="cron" name="cron" aria-label="Cron-Ausdruck" placeholder="Cron, z. B. 0 2 * * *" required maxlength="100" />
-    <input class="url" name="url" aria-label="YouTube-URL" placeholder="URL" required maxlength="2048" />
+    <input class="url" name="url" list="recentList" autocomplete="off" aria-label="YouTube-URL" placeholder="URL (gespeicherte URLs werden vorgeschlagen)" required maxlength="2048" />
 
     <select name="quality" aria-label="Auflösung">
       <option value="auto">Auflösung: auto</option>
@@ -260,14 +267,14 @@
       <option value="2160p">2160p</option>
     </select>
 
-    <input class="num" name="minutes" type="number" min="1" max="240" step="1" aria-label="Maximale Laufzeit in Minuten" placeholder="Min. (30)" />
+    <input class="num" name="minutes" type="number" min="1" max="240" step="1" aria-label="Maximale Laufzeit in Minuten" placeholder="Min. (30)" data-ph="minutes" />
 
     <label><input type="checkbox" name="repeat" /> Wiederholen</label>
-    <input class="num" name="loops" type="number" min="1" max="10" step="1" aria-label="Durchläufe (höchstens 10)" placeholder="Läufe (3)" />
+    <input class="num" name="loops" type="number" min="1" max="10" step="1" aria-label="Durchläufe (höchstens 10)" placeholder="Läufe (3)" data-ph="loops" />
 
     <button class="primary" type="submit">Plan hinzufügen</button>
   </form>
-  <p class="note">Läufe müssen mindestens 5 Minuten auseinanderliegen. Ein Lauf wird übersprungen, wenn der vorherige noch aktiv ist.</p>
+  <p class="note">Läufe müssen mindestens <span id="minGapText">5</span> Minute(n) auseinanderliegen (einstellbar unter „Einstellungen“). Ein Lauf wird übersprungen, wenn der vorherige noch aktiv ist.</p>
 
   <div class="scroll">
     <table>
@@ -286,6 +293,29 @@
     </table>
   </div>
 
+  <h2>Einstellungen</h2>
+
+  <form id="settingsForm" class="row">
+    <label class="setting"><span>Parallele Sessions</span>
+      <input class="num" name="maxSessions" type="number" min="1" max="10" step="1" required />
+    </label>
+    <label class="setting"><span>Standard-Läufe</span>
+      <input class="num" name="defaultLoops" type="number" min="1" max="10" step="1" required />
+    </label>
+    <label class="setting"><span>Standard-Laufzeit (Min.)</span>
+      <input class="num" name="defaultRuntimeMin" type="number" min="1" max="240" step="1" required />
+    </label>
+    <label class="setting"><span>Zeitplan-Abstand (Min.)</span>
+      <input class="num" name="minScheduleIntervalMin" type="number" min="1" max="60" step="1" required />
+    </label>
+    <button class="primary row-end" type="submit">Speichern</button>
+    <button class="row-end" type="button" id="resetSettings">Standardwerte</button>
+  </form>
+  <p class="note" id="settingsNote">
+    Die Einstellungen gelten für neue Sessions und Zeitpläne und bleiben nach dem Schließen der App erhalten.
+    Bereits laufende Sessions ändern sich nicht.
+  </p>
+
   <script nonce="{{NONCE}}">
     "use strict";
 
@@ -303,9 +333,10 @@
     // Ein Sample jünger als das zählt für die Gesamtwerte.
     const FRESH_MS = 5000;
 
-    // URL-Verlauf (lokal im Browser, überlebt App-Neustarts).
-    const RECENT_KEY = "tb_recent_urls";
-    const RECENT_MAX = 10;
+    // Gespeicherte URLs und Einstellungen liegen im Datenordner der App (nicht im
+    // Browser-Speicher: der gilt pro Adresse samt Port, und der Port wechselt bei jedem Start).
+    let recentUrls = [];
+    let settings = null;
 
     let maxSessions = null;
     let browserLoad = { cpu: 0, ram: 0, ts: 0 };
@@ -319,6 +350,7 @@
     const ramEl = $("ram");
     const activeCountEl = $("activeCount");
     const recentUrlsEl = $("recentUrls");
+    const recentListEl = $("recentList");
     const sessionsBody = $("sessionsBody");
     const summariesBody = $("summariesBody");
     const schedulesBody = $("schedulesBody");
@@ -711,13 +743,15 @@
       const body = sessionBody(new FormData(e.currentTarget));
       const r = await api("/api/sessions", { method: "POST", body: JSON.stringify(body) });
 
+      // Die URL wird vom Core vor dem Start gespeichert – auch wenn der Start scheitert.
+      loadRecentUrls();
+
       if (!r.ok) {
         showMsg(`Fehler: ${r.data.error ?? "Start fehlgeschlagen (" + r.status + ")"}`, true);
         return;
       }
 
       showMsg(`Session gestartet: ${shortId(r.data.id)} (${r.data.kind})`, false);
-      addRecentUrl(body.url);
 
       sessions.set(r.data.id, { sessionId: r.data.id, state: "starting", kind: r.data.kind, ts: Date.now() });
       renderSessions();
@@ -731,6 +765,8 @@
       const body = { cron: String(fd.get("cron") ?? "").trim(), enabled: true, session: sessionBody(fd) };
 
       const r = await api("/api/schedules", { method: "POST", body: JSON.stringify(body) });
+
+      loadRecentUrls();
 
       if (!r.ok) {
         showMsg(`Fehler: ${r.data.error ?? "Zeitplan konnte nicht angelegt werden (" + r.status + ")"}`, true);
@@ -776,43 +812,152 @@
       }
     }
 
-    // ---------- URL-Verlauf ----------
-
-    function getRecentUrls() {
-      try {
-        const v = JSON.parse(localStorage.getItem(RECENT_KEY) ?? "[]");
-        return Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
-      } catch {
-        return [];
-      }
-    }
+    // ---------- Gespeicherte URLs ----------
 
     function renderRecentUrls() {
+      const selected = recentUrlsEl.value;
+
       recentUrlsEl.replaceChildren(
-        h("option", { value: "" }, "Letzte URLs…"),
-        ...getRecentUrls().map((u) => h("option", { value: u }, u.length > 70 ? u.slice(0, 67) + "…" : u))
+        h("option", { value: "" }, "Gespeicherte URLs…"),
+        ...recentUrls.map((u) => h("option", { value: u }, u.length > 70 ? u.slice(0, 67) + "…" : u))
       );
 
-      recentUrlsEl.value = "";
+      recentUrlsEl.value = recentUrls.includes(selected) ? selected : "";
+
+      // Autovervollständigung in beiden URL-Feldern (Session und Zeitplan).
+      recentListEl.replaceChildren(...recentUrls.map((u) => h("option", { value: u })));
     }
 
-    function addRecentUrl(url) {
-      if (!url) return;
+    async function loadRecentUrls() {
+      const r = await api("/api/recent-urls");
 
-      const list = [url, ...getRecentUrls().filter((x) => x !== url)];
-
-      try {
-        localStorage.setItem(RECENT_KEY, JSON.stringify(list.slice(0, RECENT_MAX)));
-      } catch {
-        // Speicher nicht verfügbar – der Verlauf ist nur eine Bequemlichkeit.
+      if (r.ok) {
+        recentUrls = Array.isArray(r.data.urls) ? r.data.urls : [];
+        renderRecentUrls();
       }
-
-      renderRecentUrls();
     }
 
     recentUrlsEl.addEventListener("change", () => {
       if (recentUrlsEl.value) {
         document.querySelector('#sessionForm input[name="url"]').value = recentUrlsEl.value;
+      }
+    });
+
+    $("removeRecent").addEventListener("click", async () => {
+      const url = recentUrlsEl.value;
+
+      if (!url) {
+        showMsg("Bitte zuerst in der Liste „Gespeicherte URLs“ eine URL auswählen.", true);
+        return;
+      }
+
+      const r = await api(`/api/recent-urls?url=${encodeURIComponent(url)}`, { method: "DELETE" });
+
+      if (r.data?.urls) {
+        recentUrls = r.data.urls;
+        renderRecentUrls();
+      }
+
+      showMsg(r.ok ? "URL aus der Liste entfernt." : "URL war nicht (mehr) gespeichert.", !r.ok);
+    });
+
+    // Eine eingegebene URL wird sofort gemerkt (beim Verlassen des Feldes) – auch ohne Start.
+    // Ungültige Eingaben lehnt der Core still ab.
+    for (const input of document.querySelectorAll('input[name="url"]')) {
+      input.addEventListener("change", async () => {
+        const url = input.value.trim();
+
+        // Offensichtlich Ungültiges gar nicht erst senden (der Core prüft trotzdem selbst).
+        if (!/^https:\/\//i.test(url)) return;
+
+        const r = await api("/api/recent-urls", { method: "POST", body: JSON.stringify({ url }) });
+
+        if (r.ok && Array.isArray(r.data.urls)) {
+          recentUrls = r.data.urls;
+          renderRecentUrls();
+        }
+      });
+    }
+
+    // ---------- Einstellungen ----------
+
+    const settingsForm = $("settingsForm");
+
+    function applySettings(payload) {
+      settings = payload.settings;
+      maxSessions = settings.maxSessions;
+
+      for (const [key, value] of Object.entries(settings)) {
+        const input = settingsForm.elements[key];
+        const bounds = payload.bounds?.[key];
+
+        if (!input) continue;
+
+        input.value = value;
+
+        if (bounds) {
+          input.min = bounds.min;
+          input.max = bounds.max;
+        }
+      }
+
+      // Platzhalter der Formulare zeigen die aktuellen Standardwerte.
+      for (const el of document.querySelectorAll('[data-ph="minutes"]')) {
+        el.placeholder = `Min. (${settings.defaultRuntimeMin})`;
+      }
+
+      for (const el of document.querySelectorAll('[data-ph="loops"]')) {
+        el.placeholder = `Läufe (${settings.defaultLoops})`;
+      }
+
+      $("minGapText").textContent = String(settings.minScheduleIntervalMin);
+
+      const b = payload.bounds;
+
+      if (b) {
+        $("settingsNote").textContent =
+          "Die Einstellungen gelten für neue Sessions und Zeitpläne und bleiben nach dem Schließen der App erhalten. " +
+          "Bereits laufende Sessions ändern sich nicht. " +
+          `Feste Obergrenzen zum Schutz des Rechners: ${b.maxSessions.max} Sessions, ` +
+          `${b.defaultLoops.max} Läufe, ${b.defaultRuntimeMin.max} Minuten Laufzeit.`;
+      }
+
+      updateStats();
+    }
+
+    async function loadSettings() {
+      const r = await api("/api/settings");
+
+      if (r.ok) applySettings(r.data);
+    }
+
+    settingsForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+
+      const body = {};
+
+      for (const key of ["maxSessions", "defaultLoops", "defaultRuntimeMin", "minScheduleIntervalMin"]) {
+        body[key] = Number(settingsForm.elements[key].value);
+      }
+
+      const r = await api("/api/settings", { method: "PUT", body: JSON.stringify(body) });
+
+      if (r.ok) {
+        applySettings(r.data);
+        showMsg("Einstellungen gespeichert.", false);
+      } else {
+        showMsg(`Einstellungen nicht gespeichert: ${r.data.error ?? r.status}`, true);
+      }
+    });
+
+    $("resetSettings").addEventListener("click", async () => {
+      const r = await api("/api/settings/reset", { method: "POST", body: "{}" });
+
+      if (r.ok) {
+        applySettings(r.data);
+        showMsg("Einstellungen auf Standardwerte zurückgesetzt.", false);
+      } else {
+        showMsg(`Zurücksetzen fehlgeschlagen: ${r.data.error ?? r.status}`, true);
       }
     });
 
@@ -852,6 +997,9 @@
       renderSchedules();
       renderSessions();
       updateStats();
+
+      loadRecentUrls();
+      loadSettings();
     }
 
     // Zeitpläne ändern sich serverseitig (Lauf/Fehler) – regelmäßig auffrischen.
@@ -868,7 +1016,6 @@
     // Stale-Markierungen aktuell halten.
     setInterval(renderSessions, 10000);
 
-    renderRecentUrls();
     renderSessions();
     renderSummaries();
     renderSchedules();

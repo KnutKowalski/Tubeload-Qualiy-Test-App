@@ -18,7 +18,10 @@ function nextCronRun(cron: string, from: Date = new Date()): Date {
  * Prüft den Cron-Ausdruck und verlangt einen Mindestabstand zwischen den
  * Läufen (Schutz vor Ausdrücken wie "* * * * *" oder Sekunden-Crons).
  */
-export function validateCron(cron: unknown): string {
+export function validateCron(
+  cron: unknown,
+  minGapSec: number = LIMITS.minScheduleIntervalSec
+): string {
   if (typeof cron !== "string" || !cron.trim() || cron.length > 100) {
     throw new ValidationError('"cron" fehlt oder ist ungültig.');
   }
@@ -36,9 +39,10 @@ export function validateCron(cron: unknown): string {
       prev = next;
     }
 
-    if (minGap < LIMITS.minScheduleIntervalSec * 1000) {
+    // minGapSec = 0: nur die Syntax prüfen.
+    if (minGapSec > 0 && minGap < minGapSec * 1000) {
       throw new ValidationError(
-        `Cron-Läufe müssen mindestens ${LIMITS.minScheduleIntervalSec / 60} Minuten auseinander liegen.`
+        `Cron-Läufe müssen mindestens ${Math.round(minGapSec / 60)} Minute(n) auseinander liegen (änderbar unter „Einstellungen“).`
       );
     }
   } catch (e) {
@@ -60,9 +64,14 @@ export class Scheduler {
   private timer?: NodeJS.Timeout;
   private schedules: Schedule[] = [];
 
+  /**
+   * minIntervalSec: Mindestabstand der Läufe eines Zeitplans; als Funktion, damit
+   * geänderte Einstellungen sofort für neue Zeitpläne gelten.
+   */
   constructor(
     private manager: SessionManager,
-    private file = "data/schedules.json"
+    private file = "data/schedules.json",
+    private readonly minIntervalSec: () => number = () => LIMITS.minScheduleIntervalSec
   ) {
     this.load();
   }
@@ -89,7 +98,7 @@ export class Scheduler {
       throw new ValidationError(`Maximal ${LIMITS.maxSchedules} Zeitpläne erlaubt.`);
     }
 
-    const cron = validateCron(input.cron);
+    const cron = validateCron(input.cron, this.minIntervalSec());
 
     const schedule: Schedule = {
       id: crypto.randomUUID(),
@@ -151,7 +160,9 @@ export class Scheduler {
 
           this.schedules.push({
             id: o.id,
-            cron: validateCron(o.cron),
+            // Nur die feste Untergrenze (60 s) prüfen: ein später erhöhter
+            // Mindestabstand darf bestehende Zeitpläne nicht stillschweigend löschen.
+            cron: validateCron(o.cron, LIMITS.absoluteMinScheduleIntervalSec),
             enabled: o.enabled !== false,
             // Alte Dateien (mit humanize usw.) werden hier normalisiert.
             session: parseSessionInput(o.session),

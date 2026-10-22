@@ -69,8 +69,25 @@ function pickInt(
   return n;
 }
 
-/** Prüft und normalisiert eine Session-Konfiguration aus untrusted Input (API, schedules.json). */
-export function parseSessionInput(raw: unknown): SessionInput {
+/** Werte, die gelten, wenn die Anfrage keine eigenen angibt (siehe Einstellungen). */
+export interface SessionDefaults {
+  loops: number;
+  runtimeSec: number;
+}
+
+const FALLBACK_DEFAULTS: SessionDefaults = {
+  loops: LIMITS.defaultLoops,
+  runtimeSec: LIMITS.defaultRuntimeSec,
+};
+
+/**
+ * Prüft und normalisiert eine Session-Konfiguration aus untrusted Input (API, schedules.json).
+ * Die festen Obergrenzen aus LIMITS gelten immer, die Standardwerte kommen aus den Einstellungen.
+ */
+export function parseSessionInput(
+  raw: unknown,
+  defaults: SessionDefaults = FALLBACK_DEFAULTS
+): SessionInput {
   const o = asObject(raw, "Session");
 
   if (typeof o.url !== "string") {
@@ -109,10 +126,10 @@ export function parseSessionInput(raw: unknown): SessionInput {
     kind: detected,
     quality: pickEnum(o.quality, QUALITY_LABELS, "auto", "quality"),
     repeat: pickBool(o.repeat, false, "repeat"),
-    maxLoops: pickInt(o.maxLoops, LIMITS.defaultLoops, 1, LIMITS.maxLoops, "maxLoops"),
+    maxLoops: pickInt(o.maxLoops, defaults.loops, 1, LIMITS.maxLoops, "maxLoops"),
     maxRuntimeSec: pickInt(
       o.maxRuntimeSec,
-      LIMITS.defaultRuntimeSec,
+      defaults.runtimeSec,
       LIMITS.minRuntimeSec,
       LIMITS.maxRuntimeSec,
       "maxRuntimeSec"

@@ -46,6 +46,38 @@ test("validateCron: gültig, ungültig, zu häufig", () => {
   }
 });
 
+test("Mindestabstand ist einstellbar und gilt sofort für neue Zeitpläne", () => {
+  let minSec = 300;
+  const sch = new Scheduler(new FakeManager() as unknown as SessionManager, tmpFile(), () => minSec);
+
+  assert.throws(() => sch.add({ cron: "*/2 * * * *", session: session() }), /mindestens 5 Minute/);
+
+  minSec = 60;
+  assert.doesNotThrow(() => sch.add({ cron: "*/2 * * * *", session: session() }));
+  assert.doesNotThrow(() => sch.add({ cron: "* * * * *", session: session() }));
+
+  minSec = 1800;
+  assert.throws(() => sch.add({ cron: "*/10 * * * *", session: session() }), /mindestens 30 Minute/);
+  assert.doesNotThrow(() => sch.add({ cron: "0,30 * * * *", session: session() }));
+});
+
+test("validateCron: Sekunden-Crons bleiben auch mit kleinstem Abstand verboten", () => {
+  assert.doesNotThrow(() => validateCron("* * * * *", 60));
+  assert.throws(() => validateCron("*/30 * * * * *", 60), ValidationError);
+});
+
+test("Ein später erhöhter Mindestabstand löscht gespeicherte Zeitpläne nicht", () => {
+  const file = tmpFile();
+  const mgr = new FakeManager() as unknown as SessionManager;
+
+  new Scheduler(mgr, file, () => 60).add({ cron: "*/2 * * * *", session: session() });
+
+  const reloaded = new Scheduler(mgr, file, () => 1800);
+
+  assert.equal(reloaded.list().length, 1, "Zeitplan bleibt erhalten");
+  assert.throws(() => reloaded.add({ cron: "*/2 * * * *", session: session() }), ValidationError, "neue müssen den Abstand einhalten");
+});
+
 test("Lauf wird gestartet, wenn fällig, und bei Nichtbereitschaft nicht verbraucht", () => {
   const mgr = new FakeManager();
   const sch = new Scheduler(mgr as unknown as SessionManager, tmpFile());
@@ -115,7 +147,8 @@ test("Laden: alte Dateien werden normalisiert, kaputte Einträge übersprungen",
         createdAt: 1,
         session: { url: "https://www.youtube.com/watch?v=abc", humanize: true, repeat: true, quality: "720p" },
       },
-      { id: "bad-cron", cron: "* * * * *", session: { url: "https://www.youtube.com/watch?v=abc" } },
+      // Sekunden-Cron: unterschreitet die feste Untergrenze und wird verworfen
+      { id: "bad-cron", cron: "*/10 * * * * *", session: { url: "https://www.youtube.com/watch?v=abc" } },
       { id: "bad-url", cron: "0 2 * * *", session: { url: "file:///etc/passwd" } },
       "müll",
     ])

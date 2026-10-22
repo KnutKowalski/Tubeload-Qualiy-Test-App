@@ -11,7 +11,13 @@ import { csvEscape } from "./csv";
 import { LIMITS } from "./limits";
 import { log } from "./log";
 import { ManagerError, type SessionManager } from "./manager";
+import { RecentUrls } from "./recentUrls";
 import type { Scheduler } from "./scheduler";
+import {
+  SETTING_BOUNDS,
+  SettingsStore,
+  sessionDefaultsFrom,
+} from "./settings";
 import type { SummaryStore } from "./aggregator";
 import type { EndReason, Sample, SessionSummary } from "./types";
 import { parseSessionInput, ValidationError } from "./validate";
@@ -26,6 +32,10 @@ export interface ServerDeps {
   port?: number;
   /** API-Token. Ohne Angabe: TB_TOKEN oder ein zufälliges Token pro Start. */
   token?: string;
+  /** Einstellungen (Standardwerte/Grenzen). Ohne Angabe: nur im Speicher, mit Standardwerten. */
+  settings?: SettingsStore;
+  /** Zuletzt verwendete URLs. Ohne Angabe: nur im Speicher. */
+  recent?: RecentUrls;
 }
 
 export interface RunningServer {
@@ -148,6 +158,16 @@ function resolveToken(explicit?: string): string {
 
 export function startServer(deps: ServerDeps): RunningServer {
   const { manager, csv, summaries, scheduler, dataDir, dashboardPath } = deps;
+
+  const settings = deps.settings ?? new SettingsStore();
+  const recent = deps.recent ?? new RecentUrls();
+
+  const settingsPayload = () => ({
+    ok: true,
+    settings: settings.get(),
+    defaults: settings.getDefaults(),
+    bounds: SETTING_BOUNDS,
+  });
 
   const token = resolveToken(deps.token);
   let port = deps.port ?? Number(process.env.PORT ?? 7777);
@@ -300,7 +320,7 @@ export function startServer(deps: ServerDeps): RunningServer {
     if (method === "OPTIONS") {
       // Bewusst ohne CORS-Header: Cross-Origin-Zugriffe sind nicht vorgesehen.
       res.statusCode = 204;
-      res.setHeader("Allow", "GET,POST,PATCH,DELETE");
+      res.setHeader("Allow", "GET,POST,PUT,PATCH,DELETE");
       res.end();
       return;
     }
@@ -339,8 +359,15 @@ export function startServer(deps: ServerDeps): RunningServer {
     }
 
     if (p === "/api/sessions" && method === "POST") {
-      const input = parseSessionInput(await readJson(req));
+      const input = parseSessionInput(
+        await readJson(req),
+        sessionDefaultsFrom(settings.get())
+      );
       const id = crypto.randomUUID();
+
+      // Zuerst merken, dann starten: Die URL bleibt auch erhalten, wenn der Start
+      // an einem Limit oder am Browser scheitert ("einmal eingegeben = gespeichert").
+      recent.add(input.url);
 
       manager.start({ ...input, id });
 
@@ -352,6 +379,43 @@ export function startServer(deps: ServerDeps): RunningServer {
       const ok = manager.stop(pathId(seg[2]));
 
       sendJson(res, ok ? 200 : 404, { ok });
+      return;
+    }
+
+    if (p === "/api/settings" && method === "GET") {
+      sendJson(res, 200, settingsPayload());
+      return;
+    }
+
+    if (p === "/api/settings" && method === "PUT") {
+      settings.update(await readJson(req));
+      sendJson(res, 200, settingsPayload());
+      return;
+    }
+
+    if (p === "/api/settings/reset" && method === "POST") {
+      settings.reset();
+      sendJson(res, 200, settingsPayload());
+      return;
+    }
+
+    if (p === "/api/recent-urls" && method === "GET") {
+      sendJson(res, 200, { ok: true, urls: recent.all() });
+      return;
+    }
+
+    if (p === "/api/recent-urls" && method === "POST") {
+      const body = (await readJson(req)) as { url?: unknown } | null;
+
+      recent.add(body?.url);
+      sendJson(res, 200, { ok: true, urls: recent.all() });
+      return;
+    }
+
+    if (p === "/api/recent-urls" && method === "DELETE") {
+      const removed = recent.remove(url.searchParams.get("url") ?? undefined);
+
+      sendJson(res, removed ? 200 : 404, { ok: removed, urls: recent.all() });
       return;
     }
 
@@ -376,10 +440,17 @@ export function startServer(deps: ServerDeps): RunningServer {
         throw new ValidationError('"enabled" muss true oder false sein.');
       }
 
+      const session = parseSessionInput(
+        body.session,
+        sessionDefaultsFrom(settings.get())
+      );
+
+      recent.add(session.url);
+
       const schedule = scheduler.add({
         cron: body.cron as string,
         enabled: body.enabled as boolean | undefined,
-        session: parseSessionInput(body.session),
+        session,
       });
 
       sendJson(res, 200, { ok: true, schedule });

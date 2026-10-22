@@ -1,4 +1,20 @@
+import fs from "node:fs";
+import path from "node:path";
+
 import type { QualityLabel } from "./types";
+
+/**
+ * Schreibt JSON atomar (temporäre Datei + Umbenennen), damit ein Absturz
+ * mitten im Schreiben nie eine halbe Datei hinterlässt.
+ */
+export function writeJsonAtomic(file: string, data: unknown): void {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+
+  const tmp = `${file}.tmp`;
+
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
+  fs.renameSync(tmp, file);
+}
 
 /**
  * Wartet ms Millisekunden oder bis das Signal abbricht.

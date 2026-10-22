@@ -18,6 +18,16 @@ test("Defaults: sichere Werte, keine Dauerschleife", () => {
   assert.equal(s.consentMode, "reject");
 });
 
+test("Defaults lassen sich übergeben, explizite Werte und feste Obergrenzen gelten weiter", () => {
+  const d = { loops: 5, runtimeSec: 600 };
+  const s = parseSessionInput({ url: URL_OK }, d);
+
+  assert.equal(s.maxLoops, 5);
+  assert.equal(s.maxRuntimeSec, 600);
+  assert.equal(parseSessionInput({ url: URL_OK, maxLoops: 2 }, d).maxLoops, 2);
+  assert.throws(() => parseSessionInput({ url: URL_OK, maxLoops: LIMITS.maxLoops + 1 }, d), ValidationError);
+});
+
 test("lehnt fremde/gefährliche URLs ab", () => {
   for (const url of ["file:///etc/hostname", "http://127.0.0.1:7777/", "https://evil.example/x"]) {
     assert.throws(() => parseSessionInput({ url }), ValidationError, url);

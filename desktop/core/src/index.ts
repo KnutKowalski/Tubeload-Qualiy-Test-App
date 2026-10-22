@@ -8,8 +8,10 @@ import { CsvWriter } from "./csv";
 import { log } from "./log";
 import { SessionManager } from "./manager";
 import { ProcessMonitor } from "./processMonitor";
+import { RecentUrls } from "./recentUrls";
 import { Scheduler } from "./scheduler";
 import { startServer, type RunningServer } from "./server";
+import { SettingsStore } from "./settings";
 import { errorMessage, sleep } from "./util";
 
 const HEADLESS = process.env.TB_HEADLESS !== "0";
@@ -85,17 +87,35 @@ async function main() {
   let shuttingDown = false;
 
   const monitor = new ProcessMonitor(() => browser);
-  const manager = new SessionManager(monitor);
+  // Einstellungen und URL-Verlauf liegen im Datenordner und überleben Neustarts.
+  const settings = new SettingsStore(path.join(dataDir, "settings.json"));
+  const recent = new RecentUrls(path.join(dataDir, "recent-urls.json"));
+
+  const manager = new SessionManager(monitor, () => settings.get().maxSessions);
   const csv = new CsvWriter(path.join(dataDir, "samples.csv"));
   const summaries = new SummaryStore(path.join(dataDir, "summaries.json"));
-  const scheduler = new Scheduler(manager, path.join(dataDir, "schedules.json"));
+  const scheduler = new Scheduler(
+    manager,
+    path.join(dataDir, "schedules.json"),
+    () => settings.get().minScheduleIntervalMin * 60
+  );
 
   // HTTP-Server ZUERST: /api/health antwortet sofort, unabhängig davon,
   // ob/wann der Browser startet.
   let running: RunningServer;
 
   try {
-    running = startServer({ manager, csv, summaries, scheduler, dataDir, dashboardPath, port });
+    running = startServer({
+      manager,
+      csv,
+      summaries,
+      scheduler,
+      dataDir,
+      dashboardPath,
+      port,
+      settings,
+      recent,
+    });
     await running.listening;
   } catch (e) {
     log.error(`HTTP-Server konnte nicht starten (Port ${port})`, e);

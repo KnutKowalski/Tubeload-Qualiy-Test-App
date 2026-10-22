@@ -38,11 +38,23 @@ export class SessionManager extends EventEmitter {
   private browser: Browser | null = null;
   private closing = false;
 
+  private readonly maxSessionsSource: () => number;
+
+  /**
+   * maxSessions: feste Zahl oder Funktion, die bei jedem Start den aktuellen Wert
+   * liefert (so wirken geänderte Einstellungen sofort für neue Sessions).
+   */
   constructor(
     private readonly monitor: ProcessMonitor,
-    readonly maxSessions: number = configuredMaxSessions()
+    maxSessions: number | (() => number) = configuredMaxSessions()
   ) {
     super();
+    this.maxSessionsSource =
+      typeof maxSessions === "function" ? maxSessions : () => maxSessions;
+  }
+
+  get maxSessions(): number {
+    return this.maxSessionsSource();
   }
 
   /** Wird vom Core aufgerufen, sobald der Browser bereit ist (oder null bei Verlust). */
@@ -80,10 +92,12 @@ export class SessionManager extends EventEmitter {
       throw new ManagerError("exists", `Session ${cfg.id} existiert bereits.`);
     }
 
-    if (this.runners.size >= this.maxSessions) {
+    const max = this.maxSessions;
+
+    if (this.runners.size >= max) {
       throw new ManagerError(
         "limit",
-        `Maximal ${this.maxSessions} gleichzeitige Sessions erlaubt (TB_MAX_SESSIONS).`
+        `Maximal ${max} gleichzeitige Sessions erlaubt (änderbar unter „Einstellungen“).`
       );
     }
 
