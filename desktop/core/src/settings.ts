@@ -4,7 +4,8 @@ import fs from "node:fs";
 import { LIMITS, configuredMaxSessions } from "./limits";
 import { log } from "./log";
 import { errorMessage, writeJsonAtomic } from "./util";
-import { ValidationError, type SessionDefaults } from "./validate";
+import { ValidationError } from "./errors";
+import type { SessionDefaults } from "./validate";
 
 /**
  * Vom Nutzer einstellbare Werte. Sie gelten für neue Sessions und Zeitpläne;

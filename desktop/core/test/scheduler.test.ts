@@ -163,6 +163,28 @@ test("Laden: alte Dateien werden normalisiert, kaputte Einträge übersprungen",
   assert.equal(list[0].session.repeat, true);
 });
 
+test("Interaktionsskript bleibt im Zeitplan erhalten (auch nach Neustart); alte Zeitpläne ohne Skript laden", () => {
+  const file = tmpFile();
+  const mgr = new FakeManager() as unknown as SessionManager;
+  const input = parseSessionInput({ url: "https://www.youtube.com/watch?v=abc", interactions: "20 pause 3\n40 seek -5" });
+
+  new Scheduler(mgr, file).add({ cron: "0 2 * * *", session: input });
+
+  const reloaded = new Scheduler(mgr, file).list();
+
+  assert.equal(reloaded.length, 1);
+  assert.deepEqual(reloaded[0].session.interactions, input.interactions);
+  assert.equal(reloaded[0].session.interactions.length, 2);
+
+  // Datei aus einer älteren Version: kein "interactions"-Feld
+  fs.writeFileSync(
+    file,
+    JSON.stringify([{ id: "alt", cron: "0 2 * * *", session: { url: "https://www.youtube.com/watch?v=abc" } }])
+  );
+
+  assert.deepEqual(new Scheduler(mgr, file).list()[0].session.interactions, []);
+});
+
 test("setEnabled und remove", () => {
   const sch = new Scheduler(new FakeManager() as unknown as SessionManager, tmpFile());
   const a = sch.add({ cron: "0 2 * * *", session: session() });

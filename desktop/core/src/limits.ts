@@ -35,6 +35,15 @@ export const LIMITS = {
 
   /** Zuletzt verwendete URLs, die dauerhaft gemerkt werden. */
   maxRecentUrls: 50,
+
+  /** Interaktionsskript: fest vorgegebene Schritte, kein Zufall. */
+  maxInteractionSteps: 50,
+  /** Mindestabstand zwischen zwei Schritten (nach Ende einer Pause). */
+  minInteractionGapSec: 2,
+  maxPauseSec: 120,
+  maxSeekSec: 600,
+  /** So lange wird nach einer Aktion auf die Wiederaufnahme der Wiedergabe gewartet. */
+  interactionRecoveryTimeoutSec: 20,
 } as const;
 
 export function configuredMaxSessions(

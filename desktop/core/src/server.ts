@@ -19,7 +19,7 @@ import {
   sessionDefaultsFrom,
 } from "./settings";
 import type { SummaryStore } from "./aggregator";
-import type { EndReason, Sample, SessionSummary } from "./types";
+import type { EndReason, InteractionResult, Sample, SessionSummary } from "./types";
 import { parseSessionInput, ValidationError } from "./validate";
 
 export interface ServerDeps {
@@ -266,11 +266,21 @@ export function startServer(deps: ServerDeps): RunningServer {
       "endReason",
       "note",
       "finishedAt",
+      "interactions",
+      "interactionsOk",
+      "interactionsFailed",
+      "interactionsSkipped",
+      "avgRecoveryMs",
+      "maxRecoveryMs",
     ];
 
     const lines = [header.join(",")];
 
     for (const r of summaries.all()) {
+      const ia = r.interactions ?? [];
+      const ok = ia.filter((x) => x.status === "ok");
+      const rec = ok.map((x) => x.recoveryMs);
+
       lines.push(
         [
           csvEscape(r.sessionId),
@@ -287,8 +297,51 @@ export function startServer(deps: ServerDeps): RunningServer {
           csvEscape(r.endReason),
           csvEscape(r.note),
           new Date(r.finishedAt).toISOString(),
+          ia.length,
+          ok.length,
+          ia.filter((x) => x.status === "failed").length,
+          ia.filter((x) => x.status === "skipped").length,
+          rec.length ? Math.round(rec.reduce((a, b) => a + b, 0) / rec.length) : "",
+          rec.length ? Math.max(...rec) : "",
         ].join(",")
       );
+    }
+
+    return lines.join("\n") + "\n";
+  };
+
+  /** Eine Zeile je Skriptschritt: wie lange die Wiedergabe danach zur Erholung brauchte. */
+  const interactionsCsv = (): string => {
+    const lines = [
+      [
+        "sessionId",
+        "loop",
+        "plannedAtSec",
+        "startedAtSec",
+        "action",
+        "value",
+        "status",
+        "recoveryMs",
+        "note",
+      ].join(","),
+    ];
+
+    for (const r of summaries.all()) {
+      for (const x of r.interactions ?? []) {
+        lines.push(
+          [
+            csvEscape(r.sessionId),
+            x.loop,
+            x.at,
+            x.startedAtSec,
+            csvEscape(x.action),
+            x.value ?? "",
+            csvEscape(x.status),
+            x.recoveryMs,
+            csvEscape(x.note ?? ""),
+          ].join(",")
+        );
+      }
     }
 
     return lines.join("\n") + "\n";
@@ -494,6 +547,14 @@ export function startServer(deps: ServerDeps): RunningServer {
       return;
     }
 
+    if (p === "/export/interactions.csv" && method === "GET") {
+      res.statusCode = 200;
+      res.setHeader("Content-Disposition", 'attachment; filename="tubeload-interactions.csv"');
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.end(interactionsCsv());
+      return;
+    }
+
     throw new HttpError(404, "Nicht gefunden.");
   }
 
@@ -595,6 +656,11 @@ export function startServer(deps: ServerDeps): RunningServer {
     csv.append(sample);
     summaries.add(sample);
     broadcast("sample", sample);
+  });
+
+  manager.on("interaction", (sessionId: string, result: InteractionResult) => {
+    summaries.addInteraction(sessionId, result);
+    broadcast("interaction", { sessionId, ...result });
   });
 
   manager.on("started", (sessionId: string) => {

@@ -26,6 +26,37 @@ export const CONSENT_MODES = ["accept", "reject", "none"] as const;
 
 export type ConsentMode = (typeof CONSENT_MODES)[number];
 
+export const INTERACTION_ACTIONS = ["pause", "seek", "next", "previous"] as const;
+
+export type InteractionAction = (typeof INTERACTION_ACTIONS)[number];
+
+/**
+ * Ein Schritt des Interaktionsskripts. Der Ablauf ist fest vorgegeben und bei
+ * jedem Lauf identisch (kein Zufall), damit sich Messungen vergleichen lassen.
+ */
+export interface InteractionStep {
+  /** Sekunden seit Beginn der Wiedergabe des Durchlaufs. */
+  at: number;
+  action: InteractionAction;
+  /** pause: Dauer in Sekunden; seek: Sprung in Sekunden (negativ = zurück). */
+  value?: number;
+}
+
+export interface InteractionResult {
+  /** 1-basierter Durchlauf (bei Wiederholungen läuft das Skript je Durchlauf). */
+  loop: number;
+  /** Geplante Sekunde laut Skript. */
+  at: number;
+  /** Tatsächlich gestartet, Sekunden seit Beginn des Durchlaufs. */
+  startedAtSec: number;
+  action: InteractionAction;
+  value?: number;
+  status: "ok" | "failed" | "skipped";
+  /** Zeit bis die Wiedergabe nach der Aktion wieder läuft; -1 = nicht gemessen. */
+  recoveryMs: number;
+  note?: string;
+}
+
 export type SessionState =
   | "starting"
   | "idle"
@@ -60,6 +91,8 @@ export interface SessionConfig {
   startTimeoutSec: number;
   mute: boolean;
   consentMode: ConsentMode;
+  /** Festes Interaktionsskript (leer = keine Interaktionen). */
+  interactions: InteractionStep[];
 }
 
 export interface Sample {
@@ -109,6 +142,8 @@ export interface SessionSummary {
   endReason: EndReason;
   note: string;
   finishedAt: number;
+  /** Ergebnisse des Interaktionsskripts (nur wenn eines lief). */
+  interactions?: InteractionResult[];
 }
 
 export type SessionInput = Omit<SessionConfig, "id">;

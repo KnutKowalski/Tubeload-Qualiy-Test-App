@@ -94,6 +94,54 @@ export function qaPageScript(): void {
     });
   };
 
+  // Wartet, bis das Video nach einer Aktion wieder läuft (nicht pausiert, nicht beim
+  // Springen, genug Puffer) und die Position danach um mindestens 0,25 s vorankommt.
+  // Gemeldet wird der Zeitpunkt des ersten "läuft" (ab t0), nicht der der Bestätigung.
+  // target: nach einem Sprung muss die Position in dessen Nähe liegen. -1 = Zeitüberschreitung.
+  const untilPlaying = (
+    v: HTMLVideoElement,
+    t0: number,
+    timeoutMs: number,
+    target: number | null
+  ): Promise<{ ms: number; ad: boolean }> =>
+    new Promise((resolve) => {
+      let since = -1;
+      let base = 0;
+      let ad = false;
+
+      const tick = (): void => {
+        const elapsed = performance.now() - t0;
+
+        if (getPlayer()?.classList?.contains("ad-showing")) ad = true;
+
+        const near =
+          target === null || Math.abs(v.currentTime - target) <= 3 + elapsed / 1000;
+        const running =
+          !v.paused && !v.seeking && !v.ended && v.readyState >= 3 && near;
+
+        if (running) {
+          if (since < 0) {
+            since = elapsed;
+            base = v.currentTime;
+          } else if (v.currentTime - base >= 0.25) {
+            resolve({ ms: Math.round(since), ad });
+            return;
+          }
+        } else {
+          since = -1;
+        }
+
+        if (elapsed > timeoutMs) {
+          resolve({ ms: -1, ad });
+          return;
+        }
+
+        setTimeout(tick, 50);
+      };
+
+      tick();
+    });
+
   const computeState = (v: HTMLVideoElement): string => {
     if (v.error) return "error";
     if (v.ended) return "ended";
@@ -161,6 +209,95 @@ export function qaPageScript(): void {
       getVideo()
         ?.play()
         .catch(() => {});
+    },
+
+    // --- Interaktionsskript: feste, vom Nutzer vorgegebene Steuerung ---
+
+    /** Pausiert; true, wenn das Video danach tatsächlich pausiert ist. */
+    pause(): boolean {
+      const v = getVideo();
+
+      if (!v) return false;
+
+      try {
+        getPlayer()?.pauseVideo?.();
+      } catch {}
+
+      if (!v.paused) v.pause();
+
+      return v.paused;
+    },
+
+    /** Setzt fort; liefert die Zeit bis das Video wieder läuft (ms, -1 = nicht). */
+    resume(timeoutMs: number): Promise<{ ms: number; ad: boolean }> {
+      const v = getVideo();
+
+      if (!v) return Promise.resolve({ ms: -1, ad: false });
+
+      const t0 = performance.now();
+
+      try {
+        getPlayer()?.playVideo?.();
+      } catch {}
+
+      v.play().catch(() => {});
+
+      return untilPlaying(v, t0, timeoutMs, null);
+    },
+
+    /** Springt um delta Sekunden (negativ = zurück) und misst die Zeit bis zur Wiedergabe. */
+    async seekBy(
+      delta: number,
+      timeoutMs: number
+    ): Promise<{ ok: boolean; from: number; to: number; ms: number; ad: boolean; clamped: boolean }> {
+      const v = getVideo();
+
+      if (!v) return { ok: false, from: 0, to: 0, ms: -1, ad: false, clamped: false };
+
+      const from = v.currentTime;
+      const dur = Number.isFinite(v.duration) ? v.duration : 0;
+
+      let to = from + delta;
+      const limited = Math.max(0, dur > 2 ? Math.min(to, dur - 2) : to);
+      const clamped = limited !== to;
+
+      to = limited;
+
+      const t0 = performance.now();
+      const player = getPlayer();
+
+      try {
+        if (typeof player?.seekTo === "function") player.seekTo(to, true);
+        else v.currentTime = to;
+      } catch {
+        v.currentTime = to;
+      }
+
+      // Falls die Wiedergabe pausiert war, läuft sie nach dem Sprung weiter.
+      if (v.paused) v.play().catch(() => {});
+
+      const r = await untilPlaying(v, t0, timeoutMs, to);
+
+      return { ok: r.ms >= 0, from, to, ms: r.ms, ad: r.ad, clamped };
+    },
+
+    /** Nächstes (dir > 0) bzw. vorheriges Video der Playlist über die Player-API. */
+    step(dir: number): boolean {
+      const player = getPlayer();
+
+      try {
+        if (dir > 0 && typeof player?.nextVideo === "function") {
+          player.nextVideo();
+          return true;
+        }
+
+        if (dir < 0 && typeof player?.previousVideo === "function") {
+          player.previousVideo();
+          return true;
+        }
+      } catch {}
+
+      return false;
     },
 
     // Best effort: YouTube hat die Qualitäts-API 2019 abgekündigt (No-op).

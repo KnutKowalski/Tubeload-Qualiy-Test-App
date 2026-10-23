@@ -359,3 +359,125 @@ test("WebSocket: nur mit Token, gültigem Origin; Samples werden gesendet", asyn
 
   good.ws!.close();
 });
+
+test("Interaktionsskript: Text oder Liste wird angenommen und normalisiert an den Manager gegeben", async () => {
+  const before = mgr.started.length;
+
+  const r = await request(port, {
+    method: "POST",
+    path: "/api/sessions",
+    headers: json,
+    body: JSON.stringify({ url: VIDEO, interactions: "30 pause 5\n1:00 seek +30\n1:30 seek -15" }),
+  });
+
+  assert.equal(r.status, 200);
+  assert.deepEqual(mgr.started[before].interactions, [
+    { at: 30, action: "pause", value: 5 },
+    { at: 60, action: "seek", value: 30 },
+    { at: 90, action: "seek", value: -15 },
+  ]);
+
+  const r2 = await request(port, {
+    method: "POST",
+    path: "/api/sessions",
+    headers: json,
+    body: JSON.stringify({ url: VIDEO, interactions: [{ at: 10, action: "next" }] }),
+  });
+
+  assert.equal(r2.status, 200);
+  assert.deepEqual(mgr.started[before + 1].interactions, [{ at: 10, action: "next" }]);
+
+  // ohne Angabe: keine Interaktionen
+  await request(port, { method: "POST", path: "/api/sessions", headers: json, body: JSON.stringify({ url: VIDEO }) });
+  assert.deepEqual(mgr.started[before + 2].interactions, []);
+});
+
+test("Interaktionsskript: ungültige Skripte -> 400 mit Zeilenangabe, nichts wird gestartet", async () => {
+  const before = mgr.started.length;
+
+  for (const interactions of ["10 tanzen", "10 seek", "10 pause 5\n11 seek 5", 42, [{ at: 1, action: "zufall" }]]) {
+    const r = await request(port, {
+      method: "POST",
+      path: "/api/sessions",
+      headers: json,
+      body: JSON.stringify({ url: VIDEO, interactions }),
+    });
+
+    assert.equal(r.status, 400, JSON.stringify(interactions));
+    assert.equal(typeof JSON.parse(r.body).error, "string");
+  }
+
+  const r = await request(port, {
+    method: "POST",
+    path: "/api/sessions",
+    headers: json,
+    body: JSON.stringify({ url: VIDEO, interactions: "10 seek 5\n\n20 tanzen" }),
+  });
+
+  assert.match(JSON.parse(r.body).error, /Zeile 3/);
+  assert.equal(mgr.started.length, before);
+});
+
+test("Interaktionsskript: auch im Zeitplan, ungültiges Skript lehnt den Zeitplan ab", async () => {
+  const ok = await request(port, {
+    method: "POST",
+    path: "/api/schedules",
+    headers: json,
+    body: JSON.stringify({ cron: "0 4 * * *", session: { url: VIDEO, interactions: "20 pause 3\n40 seek -5" } }),
+  });
+
+  assert.equal(ok.status, 200);
+
+  const s = JSON.parse(ok.body).schedule;
+
+  assert.equal(s.session.interactions.length, 2);
+
+  const bad = await request(port, {
+    method: "POST",
+    path: "/api/schedules",
+    headers: json,
+    body: JSON.stringify({ cron: "0 5 * * *", session: { url: VIDEO, interactions: "x" } }),
+  });
+
+  assert.equal(bad.status, 400);
+
+  await request(port, { method: "DELETE", path: `/api/schedules/${s.id}`, headers: auth });
+});
+
+test("Interaktions-Ergebnisse: Event -> Zusammenfassung, Export erfordert Token, Formeln werden neutralisiert", async () => {
+  assert.equal((await request(port, { path: "/export/interactions.csv" })).status, 401);
+
+  const base = { loop: 1, startedAtSec: 30, status: "ok" as const };
+
+  mgr.emit("interaction", "ia-1", { ...base, at: 30, action: "pause", value: 5, recoveryMs: 420 });
+  mgr.emit("interaction", "ia-1", { ...base, at: 60, action: "seek", value: 30, recoveryMs: 880 });
+  mgr.emit("interaction", "ia-1", { ...base, at: 90, action: "next", status: "skipped", recoveryMs: -1, note: "=HYPERLINK(\"x\")" });
+  mgr.emit("stopped", "ia-1", "completed");
+
+  const sums = JSON.parse((await request(port, { path: "/api/summaries", headers: auth })).body).summaries as {
+    sessionId: string;
+    interactions?: unknown[];
+  }[];
+
+  assert.equal(sums.find((x) => x.sessionId === "ia-1")?.interactions?.length, 3);
+
+  const csv = await request(port, { path: "/export/interactions.csv", headers: auth });
+
+  assert.equal(csv.status, 200);
+  assert.match(csv.headers["content-type"] ?? "", /text\/csv/);
+  assert.match(csv.body.split("\n")[0], /^sessionId,loop,plannedAtSec,startedAtSec,action,value,status,recoveryMs,note$/);
+  assert.match(csv.body, /ia-1,1,30,30,pause,5,ok,420,/);
+  assert.match(csv.body, /ia-1,1,60,30,seek,30,ok,880,/);
+  assert.match(csv.body, /ia-1,1,90,30,next,,skipped,-1,/);
+  assert.ok(!/,=HYPERLINK/.test(csv.body), "Formel am Zellanfang muss neutralisiert sein");
+  assert.match(csv.body, /'=HYPERLINK/);
+
+  const sumCsv = (await request(port, { path: "/export/summaries.csv", headers: auth })).body;
+  const [head, ...rows] = sumCsv.trim().split("\n");
+
+  assert.match(head, /interactions,interactionsOk,interactionsFailed,interactionsSkipped,avgRecoveryMs,maxRecoveryMs$/);
+
+  const row = rows.find((x) => x.startsWith("ia-1"))!;
+
+  assert.match(row, /,3,2,0,1,650,880$/);
+});

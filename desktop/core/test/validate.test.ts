@@ -28,6 +28,25 @@ test("Defaults lassen sich übergeben, explizite Werte und feste Obergrenzen gel
   assert.throws(() => parseSessionInput({ url: URL_OK, maxLoops: LIMITS.maxLoops + 1 }, d), ValidationError);
 });
 
+test("Interaktionen: Standard leer; Skripttext und Liste werden normalisiert, Fehler abgelehnt", () => {
+  assert.deepEqual(parseSessionInput({ url: URL_OK }).interactions, []);
+  assert.deepEqual(parseSessionInput({ url: URL_OK, interactions: "30 pause 5\n1:00 seek -10" }).interactions, [
+    { at: 30, action: "pause", value: 5 },
+    { at: 60, action: "seek", value: -10 },
+  ]);
+  assert.deepEqual(parseSessionInput({ url: URL_OK, interactions: [{ at: 5, action: "next" }] }).interactions, [
+    { at: 5, action: "next" },
+  ]);
+
+  // Schritte dürfen nicht hinter der maximalen Laufzeit liegen
+  assert.throws(() => parseSessionInput({ url: URL_OK, maxRuntimeSec: 60, interactions: "61 next" }), ValidationError);
+  assert.doesNotThrow(() => parseSessionInput({ url: URL_OK, maxRuntimeSec: 60, interactions: "60 next" }));
+
+  for (const bad of ["10 tanzen", 5, [{ at: 1, action: "zufall" }]]) {
+    assert.throws(() => parseSessionInput({ url: URL_OK, interactions: bad }), ValidationError, JSON.stringify(bad));
+  }
+});
+
 test("lehnt fremde/gefährliche URLs ab", () => {
   for (const url of ["file:///etc/hostname", "http://127.0.0.1:7777/", "https://evil.example/x"]) {
     assert.throws(() => parseSessionInput({ url }), ValidationError, url);

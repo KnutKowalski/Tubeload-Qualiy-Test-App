@@ -6,7 +6,7 @@ import { log } from "./log";
 import type { ProcessMonitor } from "./processMonitor";
 import { SessionRunner } from "./session";
 import { shortError, sleep } from "./util";
-import type { EndReason, Sample, SessionConfig } from "./types";
+import type { EndReason, InteractionResult, Sample, SessionConfig } from "./types";
 
 export type ManagerErrorCode =
   | "no_browser"
@@ -27,6 +27,7 @@ export class ManagerError extends Error {
 /**
  * Events:
  *  - "sample"        (sample: Sample)
+ *  - "interaction"   (sessionId: string, result: InteractionResult)
  *  - "started"       (sessionId: string)
  *  - "stopped"       (sessionId: string, reason: EndReason)
  *  - "session-error" (sessionId: string, message: string)
@@ -101,9 +102,17 @@ export class SessionManager extends EventEmitter {
       );
     }
 
-    const runner = new SessionRunner(cfg, browser, this.monitor, (s: Sample) => {
-      this.emit("sample", s);
-    });
+    const runner = new SessionRunner(
+      cfg,
+      browser,
+      this.monitor,
+      (s: Sample) => {
+        this.emit("sample", s);
+      },
+      (r: InteractionResult) => {
+        this.emit("interaction", cfg.id, r);
+      }
+    );
 
     this.runners.set(cfg.id, runner);
     this.emit("started", cfg.id);

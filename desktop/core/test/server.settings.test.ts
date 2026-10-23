@@ -240,5 +240,7 @@ test("Dashboard enthält Einstellungen und speichert keine URLs mehr im Browser-
   assert.match(html, /id="settingsForm"/);
   assert.match(html, /name="maxSessions"/);
   assert.match(html, /name="minScheduleIntervalMin"/);
+  assert.equal((html.match(/name="interactions"/g) ?? []).length, 2, "Skriptfeld in Session- und Zeitplan-Formular");
+  assert.match(html, /id="exportInteractions"/);
   assert.equal(/localStorage/.test(html), false, "kein localStorage: der gilt pro Port und geht beim Neustart verloren");
 });

@@ -125,6 +125,25 @@
     .setting span { font-size: 12px; color: var(--muted); }
     .setting input { margin: 0; }
     .row-end { align-self: flex-end; }
+
+    .ia { flex: 1 1 100%; margin: 4px 3px; }
+    .ia summary { cursor: pointer; color: var(--muted); }
+    .ia summary:hover { color: var(--text); }
+    textarea.script {
+      display: block;
+      width: 100%;
+      max-width: 640px;
+      min-height: 120px;
+      margin: 6px 3px;
+      padding: 7px 9px;
+      background: var(--field);
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      font: 13px ui-monospace, Menlo, Consolas, monospace;
+    }
+    textarea.script:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+    code { background: #222; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
   </style>
 </head>
 <body>
@@ -175,6 +194,26 @@
     <button class="primary" type="submit">Start</button>
     <button type="button" id="exportSamples">Samples CSV</button>
     <button type="button" id="exportSummaries">Summaries CSV</button>
+    <button type="button" id="exportInteractions" title="Eine Zeile je Skriptschritt mit der gemessenen Erholzeit">Interaktionen CSV</button>
+
+    <details class="ia">
+      <summary>Interaktionsskript (optional): Pause, Vor- und Zurückspulen, Videowechsel</summary>
+      <div class="row">
+        <select class="preset" aria-label="Vorlage für das Skript"></select>
+        <button type="button" class="clearScript">Leeren</button>
+      </div>
+      <textarea class="script" name="interactions" rows="6" spellcheck="false" maxlength="10000" aria-label="Interaktionsskript"
+        placeholder="30 pause 5&#10;1:00 seek +30&#10;1:30 seek -15&#10;2:00 next&#10;2:30 previous"></textarea>
+      <p class="note">
+        Eine Zeile pro Schritt: <code>Zeit Aktion [Wert]</code>. Die Zeit zählt in Sekunden oder als <code>m:ss</code> ab
+        Beginn des Durchlaufs. Aktionen: <code>pause [Sekunden]</code>, <code>seek +30</code> / <code>seek -15</code>
+        (vor- bzw. zurückspulen), <code>next</code> / <code>previous</code> (nächstes bzw. vorheriges Video, nur bei
+        Playlist oder Kanal). <code>#</code> beginnt einen Kommentar.
+        Der Ablauf ist fest und bei jedem Durchlauf identisch (kein Zufall), damit sich Messungen vergleichen lassen.
+        Pro Schritt wird gemessen, wie lange die Wiedergabe danach bis zum erneuten Laufen braucht.
+        Zwischen zwei Schritten mindestens 2 s (Pausen zählen mit), höchstens 50 Schritte.
+      </p>
+    </details>
   </form>
 
   <div id="msg" role="status" aria-live="polite"></div>
@@ -242,6 +281,7 @@
           <th>Auflösung</th>
           <th>Drop %</th>
           <th>Ende</th>
+          <th>Interaktionen</th>
           <th>Notiz</th>
         </tr>
       </thead>
@@ -273,6 +313,25 @@
     <input class="num" name="loops" type="number" min="1" max="10" step="1" aria-label="Durchläufe (höchstens 10)" placeholder="Läufe (3)" data-ph="loops" />
 
     <button class="primary" type="submit">Plan hinzufügen</button>
+
+    <details class="ia">
+      <summary>Interaktionsskript (optional): Pause, Vor- und Zurückspulen, Videowechsel</summary>
+      <div class="row">
+        <select class="preset" aria-label="Vorlage für das Skript"></select>
+        <button type="button" class="clearScript">Leeren</button>
+      </div>
+      <textarea class="script" name="interactions" rows="6" spellcheck="false" maxlength="10000" aria-label="Interaktionsskript"
+        placeholder="30 pause 5&#10;1:00 seek +30&#10;1:30 seek -15&#10;2:00 next&#10;2:30 previous"></textarea>
+      <p class="note">
+        Eine Zeile pro Schritt: <code>Zeit Aktion [Wert]</code>. Die Zeit zählt in Sekunden oder als <code>m:ss</code> ab
+        Beginn des Durchlaufs. Aktionen: <code>pause [Sekunden]</code>, <code>seek +30</code> / <code>seek -15</code>
+        (vor- bzw. zurückspulen), <code>next</code> / <code>previous</code> (nächstes bzw. vorheriges Video, nur bei
+        Playlist oder Kanal). <code>#</code> beginnt einen Kommentar.
+        Der Ablauf ist fest und bei jedem Durchlauf identisch (kein Zufall), damit sich Messungen vergleichen lassen.
+        Pro Schritt wird gemessen, wie lange die Wiedergabe danach bis zum erneuten Laufen braucht.
+        Zwischen zwei Schritten mindestens 2 s (Pausen zählen mit), höchstens 50 Schritte.
+      </p>
+    </details>
   </form>
   <p class="note">Läufe müssen mindestens <span id="minGapText">5</span> Minute(n) auseinanderliegen (einstellbar unter „Einstellungen“). Ein Lauf wird übersprungen, wenn der vorherige noch aktiv ist.</p>
 
@@ -656,11 +715,80 @@
       sessionsBody.replaceChildren(...rows);
     }
 
+    // ---------- Interaktionsskript ----------
+
+    // Feste Vorlagen (kein Zufall): derselbe Text ergibt bei jedem Lauf dieselbe Abfolge.
+    const SCRIPT_PRESETS = {
+      seek: ["Vor- und Zurückspulen", "20 seek +30\n40 seek -15\n60 seek +60\n80 seek -30"],
+      pause: ["Pausen unterschiedlicher Länge", "20 pause 5\n40 pause 10\n70 pause 20"],
+      mixed: [
+        "Gemischter Ablauf (Pause, Spulen, Videowechsel)",
+        "20 pause 5\n40 seek +30\n60 seek -15\n80 next\n100 previous\n120 pause 10",
+      ],
+      navigation: ["Videowechsel in Playlist oder Kanal", "30 next\n60 next\n90 previous"],
+    };
+
+    function setupScriptBoxes() {
+      for (const box of document.querySelectorAll("details.ia")) {
+        const preset = box.querySelector("select.preset");
+        const area = box.querySelector("textarea.script");
+
+        preset.replaceChildren(
+          h("option", { value: "" }, "Vorlage wählen…"),
+          ...Object.entries(SCRIPT_PRESETS).map(([key, [label]]) => h("option", { value: key }, label))
+        );
+
+        preset.addEventListener("change", () => {
+          const p = SCRIPT_PRESETS[preset.value];
+
+          if (p) area.value = p[1];
+        });
+
+        box.querySelector("button.clearScript").addEventListener("click", () => {
+          area.value = "";
+          preset.value = "";
+        });
+      }
+    }
+
+    const ACTION_TEXT = { pause: "Pause", seek: "Sprung", next: "nächstes Video", previous: "vorheriges Video" };
+
+    function stepText(x) {
+      const t = `${Math.floor(x.at / 60)}:${String(x.at % 60).padStart(2, "0")}`;
+      let a = ACTION_TEXT[x.action] ?? x.action;
+
+      if (x.action === "pause") a += ` ${x.value} s`;
+      if (x.action === "seek") a += ` ${x.value > 0 ? "+" : ""}${x.value} s`;
+
+      const r = x.status === "ok" ? `${x.recoveryMs} ms` : x.status === "skipped" ? "übersprungen" : "fehlgeschlagen";
+
+      return `Lauf ${x.loop} · ${t} ${a} → ${r}${x.note ? " (" + x.note + ")" : ""}`;
+    }
+
+    function interactionCell(s) {
+      const list = Array.isArray(s.interactions) ? s.interactions : [];
+
+      if (list.length === 0) return h("td", { class: "muted" }, "–");
+
+      const ok = list.filter((x) => x.status === "ok");
+      const failed = list.filter((x) => x.status === "failed").length;
+      const skipped = list.filter((x) => x.status === "skipped").length;
+      const avg = ok.length ? Math.round(ok.reduce((a, x) => a + x.recoveryMs, 0) / ok.length) : null;
+
+      const text =
+        `${ok.length}/${list.length} ok` +
+        (failed ? ` · ${failed} fehlgeschlagen` : "") +
+        (skipped ? ` · ${skipped} übersprungen` : "") +
+        (avg !== null ? ` · Ø ${avg} ms` : "");
+
+      return h("td", { class: failed ? "danger" : "", title: list.map(stepText).join("\n") }, text);
+    }
+
     function renderSummaries() {
       const list = [...summaries.values()].sort((a, b) => b.finishedAt - a.finishedAt);
 
       if (list.length === 0) {
-        emptyRow(summariesBody, 13, "Noch keine abgeschlossene Session.");
+        emptyRow(summariesBody, 14, "Noch keine abgeschlossene Session.");
         return;
       }
 
@@ -681,6 +809,7 @@
             h("td", {}, s.dominantQuality),
             h("td", { class: "num-cell" }, num((s.droppedFrameRatio ?? 0) * 100, 2) + " %"),
             h("td", { class: ["error", "blocked"].includes(s.endReason) ? "danger" : "" }, s.endReason ?? ""),
+            interactionCell(s),
             h("td", { class: "muted" }, s.note ?? "")
           )
         )
@@ -734,6 +863,10 @@
       if (minutes) body.maxRuntimeSec = Math.round(Number(minutes) * 60);
       if (loops) body.maxLoops = Number(loops);
 
+      const script = String(fd.get("interactions") ?? "").trim();
+
+      if (script) body.interactions = script;
+
       return body;
     }
 
@@ -780,6 +913,9 @@
 
     $("exportSamples").addEventListener("click", () => download("/export/samples.csv", "tubeload-samples.csv"));
     $("exportSummaries").addEventListener("click", () => download("/export/summaries.csv", "tubeload-summaries.csv"));
+    $("exportInteractions").addEventListener("click", () => download("/export/interactions.csv", "tubeload-interactions.csv"));
+
+    setupScriptBoxes();
 
     async function stopSession(id) {
       const r = await api(`/api/sessions/${encodeURIComponent(id)}`, { method: "DELETE" });

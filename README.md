@@ -73,7 +73,30 @@ npm run dev         # gibt http://127.0.0.1:7777 aus; Token siehe unten
 - **Scheduler:** Cron-Ausdruck (z. B. `0 2 * * *`) plus Session-Einstellungen. Zeitpläne lassen
   sich ein- und ausschalten. Läuft der vorherige Lauf eines Plans noch, wird der nächste
   übersprungen.
-- **Export:** *Samples CSV* (Messwert pro Sekunde und Session) und *Summaries CSV* (eine Zeile pro Session).
+- **Interaktionsskript (optional):** Im Ausklappfeld des Session- und Zeitplan-Formulars gibst du
+  eine feste Abfolge von Steuerschritten vor, z. B.
+
+  ```text
+  30 pause 5        # nach 30 s: 5 s pausieren, dann fortsetzen
+  1:00 seek +30     # 30 s vorspulen
+  1:30 seek -15     # 15 s zurückspulen
+  2:00 next         # nächstes Video (Playlist/Kanal)
+  2:30 previous     # vorheriges Video (Playlist/Kanal)
+  ```
+
+  Vorlagen (Spulen, Pausen, gemischter Ablauf, Videowechsel) füllen das Feld. Die Zeit zählt ab
+  Beginn des Durchlaufs; bei Wiederholungen läuft das Skript in jedem Durchlauf erneut, immer
+  identisch. Gemessen wird pro Schritt, wie lange die Wiedergabe danach bis zum erneuten Laufen
+  braucht (Erholzeit; Pause: Zeit nach dem Fortsetzen). Schritte, die nicht möglich sind, werden
+  als *übersprungen* gemeldet (z. B. `next` bei einem Einzelvideo oder ein Schritt hinter dem
+  Videoende), Schritte ohne Erholung innerhalb von 20 s als *fehlgeschlagen*. Pausen und Sprünge
+  zählen nicht als Stall. Die Ergebnisse stehen in der Spalte *Interaktionen* der Zusammenfassung
+  (Tooltip: jeder Schritt) und im Export *Interaktionen CSV*. Es gibt **bewusst keinen Zufallsmodus**:
+  Zufällige Aktionen machen Messungen unvergleichbar und dienen nur dazu, automatisiertes Abspielen
+  wie menschliches Zuschauen aussehen zu lassen, was nicht Zweck der App ist.
+  Die Interaktionen gibt es nur in der Desktop-App.
+- **Export:** *Samples CSV* (Messwert pro Sekunde und Session), *Summaries CSV* (eine Zeile pro Session,
+  mit Anzahl und Ø/max. Erholzeit der Interaktionen) und *Interaktionen CSV* (eine Zeile pro Schritt).
 
 ### Was gemessen wird
 
@@ -125,6 +148,7 @@ wieder her. Die **festen Obergrenzen** schützen den Rechner und lassen sich nic
 | Laufzeit pro Session | 30 min | 1 – 240 min |
 | Mindestabstand zwischen Zeitplan-Läufen | 5 min | 1 – 60 min |
 | Zeitpläne | – | 50 (fest) |
+| Interaktionsskript | – | 50 Schritte, mind. 2 s Abstand (Pausen zählen mit), Pause 1–120 s, Sprung ±600 s (fest) |
 | Android: Wiederholungen / Laufzeit | 3 / 30 min (Felder in der App) | 1 – 10 / 1 – 240 min |
 
 Zeitpläne dürfen nie häufiger als im Minutentakt laufen (Sekunden-Crons werden abgelehnt). Wird der

@@ -8,7 +8,8 @@ import type { Browser } from "playwright-core";
 
 import { ProcessMonitor } from "../src/processMonitor";
 import { SessionRunner } from "../src/session";
-import type { Sample, SessionConfig } from "../src/types";
+import { parseInteractionScript } from "../src/interactions";
+import type { InteractionResult, Sample, SessionConfig } from "../src/types";
 import { launchTestBrowser } from "./helpers";
 
 /**
@@ -124,6 +125,7 @@ function config(url: string, over: Partial<SessionConfig> = {}): SessionConfig {
     startTimeoutSec: 15,
     mute: true,
     consentMode: "none",
+    interactions: [],
     ...over,
   };
 }
@@ -299,6 +301,143 @@ e2e("Netzwerkfehler beim Neuladen beendet nur die Session, nicht den Prozess", a
     assert.equal(runner.endReason, "error");
     // Chromium wiederholt einen GET nach einem Verbindungsabbruch teils selbst.
     assert.ok(media.pageHits() >= 2, "die Wiederholung hat den Server erreicht");
+  } finally {
+    await media.close();
+  }
+});
+
+e2e("Interaktionsskript: Pause und Sprung zurück laufen, Erholzeit wird gemessen, Einzelvideo-'next' wird übersprungen", async () => {
+  const media = await startMediaServer();
+
+  try {
+    const results: InteractionResult[] = [];
+    const samples: Sample[] = [];
+    const steps = parseInteractionScript("2 pause 2\n6 seek -3\n9 next", 1800);
+
+    const runner = new SessionRunner(
+      config(media.url("/page.html"), { interactions: steps }),
+      browser!,
+      monitor,
+      (s) => samples.push(s),
+      (r) => results.push(r)
+    );
+
+    await runner.run();
+
+    assert.equal(runner.endReason, "completed");
+    assert.equal(results.length, 3, JSON.stringify(results));
+
+    const [pause, seek, next] = results;
+
+    assert.equal(pause.action, "pause");
+    assert.equal(pause.status, "ok", JSON.stringify(pause));
+    assert.ok(pause.recoveryMs >= 0 && pause.recoveryMs < 5000, `Pause-Erholung ${pause.recoveryMs} ms`);
+    assert.ok(Math.abs(pause.startedAtSec - 2) <= 2, `Pause gestartet bei ${pause.startedAtSec} s`);
+
+    assert.equal(seek.action, "seek");
+    assert.equal(seek.value, -3);
+    assert.equal(seek.status, "ok", JSON.stringify(seek));
+    assert.ok(seek.recoveryMs >= 0 && seek.recoveryMs < 5000, `Sprung-Erholung ${seek.recoveryMs} ms`);
+
+    assert.equal(next.status, "skipped");
+    assert.match(next.note ?? "", /Einzelvideo/);
+    assert.equal(next.recoveryMs, -1);
+
+    // Die Pause war wirklich sichtbar: das Video stand, Samples zeigen "paused".
+    assert.ok(samples.some((s) => s.state === "paused"), "pausiert-Sample erwartet");
+    // Zurückspulen verlängert die Wiedergabe: mehr als die reine Videolänge (8 s) plus Pause (2 s).
+    assert.ok(samples.filter((s) => s.state === "playing").length >= 8);
+    // Ein Sprung/Pause ist kein Stall.
+    assert.ok(samples.every((s) => s.stalls === 0), "Pause und Sprung dürfen nicht als Stall zählen");
+  } finally {
+    await media.close();
+  }
+});
+
+e2e("Interaktionsskript: Schritt hinter dem Videoende wird als übersprungen gemeldet, Session endet normal", async () => {
+  const media = await startMediaServer();
+
+  try {
+    const results: InteractionResult[] = [];
+    const runner = new SessionRunner(
+      config(media.url("/page.html"), { interactions: parseInteractionScript("60 pause 5", 1800) }),
+      browser!,
+      monitor,
+      () => {},
+      (r) => results.push(r)
+    );
+
+    const t0 = Date.now();
+    await runner.run();
+
+    assert.equal(runner.endReason, "completed");
+    assert.ok(Date.now() - t0 < 40_000, "darf nicht auf den Schritt bei 60 s warten");
+    assert.equal(results.length, 1);
+    assert.equal(results[0].status, "skipped");
+    assert.match(results[0].note ?? "", /Video war vorher zu Ende/);
+  } finally {
+    await media.close();
+  }
+});
+
+e2e("Interaktionsskript: läuft in jedem Wiederholungsdurchlauf erneut, identisch", async () => {
+  const media = await startMediaServer();
+
+  try {
+    const results: InteractionResult[] = [];
+    const runner = new SessionRunner(
+      config(media.url("/page.html"), {
+        repeat: true,
+        maxLoops: 2,
+        interactions: parseInteractionScript("2 seek 1", 1800),
+      }),
+      browser!,
+      monitor,
+      () => {},
+      (r) => results.push(r)
+    );
+
+    await runner.run();
+
+    assert.equal(runner.endReason, "completed");
+    assert.deepEqual(
+      results.map((r) => [r.loop, r.action, r.value, r.status]),
+      [
+        [1, "seek", 1, "ok"],
+        [2, "seek", 1, "ok"],
+      ]
+    );
+  } finally {
+    await media.close();
+  }
+});
+
+e2e("Interaktionsskript: stop() beendet auch eine laufende Pause sofort", async () => {
+  const media = await startMediaServer();
+
+  try {
+    const results: InteractionResult[] = [];
+    const samples: Sample[] = [];
+    const runner = new SessionRunner(
+      config(media.url("/page.html"), { interactions: parseInteractionScript("2 pause 100", 1800) }),
+      browser!,
+      monitor,
+      (s) => samples.push(s),
+      (r) => results.push(r)
+    );
+
+    const done = runner.run();
+
+    await until(() => samples.some((s) => s.state === "paused"), 20_000, "Pause beginnt");
+
+    const t0 = Date.now();
+    runner.stop();
+    await done;
+
+    assert.ok(Date.now() - t0 < 8_000, "Stopp muss auch während der Pause zügig wirken");
+    assert.equal(runner.endReason, "stopped");
+    assert.equal(results.length, 1);
+    assert.equal(results[0].status, "skipped");
   } finally {
     await media.close();
   }

@@ -1,3 +1,5 @@
+import { ValidationError } from "./errors";
+import { parseInteractions } from "./interactions";
 import { LIMITS } from "./limits";
 import {
   CONSENT_MODES,
@@ -7,12 +9,7 @@ import {
 } from "./types";
 import { detectUrlKind, isAllowedYouTubeUrl } from "./url";
 
-export class ValidationError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "ValidationError";
-  }
-}
+export { ValidationError };
 
 function asObject(v: unknown, what: string): Record<string, unknown> {
   if (typeof v !== "object" || v === null || Array.isArray(v)) {
@@ -121,19 +118,23 @@ export function parseSessionInput(
     );
   }
 
+  const maxRuntimeSec = pickInt(
+    o.maxRuntimeSec,
+    defaults.runtimeSec,
+    LIMITS.minRuntimeSec,
+    LIMITS.maxRuntimeSec,
+    "maxRuntimeSec"
+  );
+
   return {
     url,
     kind: detected,
     quality: pickEnum(o.quality, QUALITY_LABELS, "auto", "quality"),
     repeat: pickBool(o.repeat, false, "repeat"),
     maxLoops: pickInt(o.maxLoops, defaults.loops, 1, LIMITS.maxLoops, "maxLoops"),
-    maxRuntimeSec: pickInt(
-      o.maxRuntimeSec,
-      defaults.runtimeSec,
-      LIMITS.minRuntimeSec,
-      LIMITS.maxRuntimeSec,
-      "maxRuntimeSec"
-    ),
+    maxRuntimeSec,
+    // Festes, wiederholbares Skript (kein Zufall); leer = keine Interaktionen.
+    interactions: parseInteractions(o.interactions, maxRuntimeSec),
     startTimeoutSec: pickInt(
       o.startTimeoutSec,
       LIMITS.defaultStartTimeoutSec,

@@ -7,9 +7,12 @@ import { resolveChannelVideos } from "./channelResolver";
 import { log } from "./log";
 import type { ProcessMonitor } from "./processMonitor";
 import { detectUrlKind, extractPlaylistId, toWatchPlaylistUrl, videoIdOf } from "./url";
+import { LIMITS } from "./limits";
 import { qualityHeight, shortError, sleep, viewportFor } from "./util";
 import type {
   EndReason,
+  InteractionResult,
+  InteractionStep,
   Sample,
   SessionConfig,
   SessionState,
@@ -37,6 +40,13 @@ interface PageStats {
 
 type EndedOutcome = "continue" | "cycle" | "stop";
 
+function describeStep(s: InteractionStep): string {
+  if (s.action === "pause") return `Pause ${s.value} s`;
+  if (s.action === "seek") return `Sprung ${(s.value ?? 0) > 0 ? "+" : ""}${s.value} s`;
+
+  return s.action === "next" ? "nächstes Video" : "vorheriges Video";
+}
+
 export class SessionRunner {
   private abort = new AbortController();
   private cdp?: CDPSession;
@@ -56,6 +66,12 @@ export class SessionRunner {
   private queueIndex = 0;
   private loops = 0;
 
+  // Interaktionsskript: je Durchlauf ein Ablauf, bei jedem Lauf identisch.
+  private scriptCtl?: AbortController;
+  private scriptDone: Promise<void> = Promise.resolve();
+  private scriptBusy = false;
+  private stepNote = "";
+
   /** Warum die Session endete – wird vom Manager in die Zusammenfassung übernommen. */
   endReason: EndReason = "completed";
 
@@ -63,7 +79,8 @@ export class SessionRunner {
     private cfg: SessionConfig,
     private browser: Browser,
     private monitor: ProcessMonitor,
-    private onSample: (s: Sample) => void
+    private onSample: (s: Sample) => void,
+    private onInteraction: (r: InteractionResult) => void = () => {}
   ) {
     this.kind = detectUrlKind(cfg.url, cfg.kind);
     this.currentUrl = cfg.url;
@@ -125,6 +142,8 @@ export class SessionRunner {
 
       if (!(await this.ensurePlaying(page))) return;
 
+      this.startScript(page);
+
       await this.playLoop(page);
     } catch (e) {
       // Fehler durch einen Abbruch (Context geschlossen, Navigation abgebrochen)
@@ -138,6 +157,10 @@ export class SessionRunner {
     } finally {
       if (this.sampler) clearInterval(this.sampler);
       if (this.runtimeTimer) clearTimeout(this.runtimeTimer);
+
+      // Offene Skriptschritte als "übersprungen" melden, bevor die Session als beendet gilt.
+      this.scriptCtl?.abort();
+      await this.scriptDone;
 
       await context.close().catch(() => {});
     }
@@ -160,6 +183,13 @@ export class SessionRunner {
     while (!this.aborted) {
       await sleep(1000, this.abort.signal);
       if (this.aborted) return;
+
+      // Während ein Skriptschritt läuft (z. B. Seitenwechsel im Kanal), wird nichts bewertet.
+      if (this.scriptBusy) {
+        missing = 0;
+        endedPolls = 0;
+        continue;
+      }
 
       const stats = await this.readStats(page);
 
@@ -206,7 +236,8 @@ export class SessionRunner {
       if (outcome === "stop") return;
       if (outcome === "continue") continue;
 
-      // Ein kompletter Durchlauf ist fertig.
+      // Ein kompletter Durchlauf ist fertig; ein noch offenes Skript endet mit ihm.
+      this.scriptCtl?.abort();
       this.loops++;
 
       if (!this.cfg.repeat || this.loops >= this.cfg.maxLoops) {
@@ -218,7 +249,266 @@ export class SessionRunner {
       await this.playCurrent(page);
 
       if (!(await this.ensurePlaying(page))) return;
+
+      this.startScript(page);
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Interaktionsskript (fest vorgegeben, kein Zufall)
+  // ---------------------------------------------------------------------------
+
+  /** Startet das Skript für den aktuellen Durchlauf; Zeiten zählen ab jetzt. */
+  private startScript(page: Page): void {
+    const steps = this.cfg.interactions ?? [];
+
+    if (!steps.length) return;
+
+    const ctl = new AbortController();
+    const onAbort = () => ctl.abort();
+
+    // Endet die Session, endet auch das Skript.
+    this.abort.signal.addEventListener("abort", onAbort, { once: true });
+
+    this.scriptCtl?.abort();
+    this.scriptCtl = ctl;
+
+    const loop = this.loops + 1;
+    const t0 = Date.now();
+    const previous = this.scriptDone;
+
+    this.scriptDone = previous
+      .then(() => this.runScript(page, steps, loop, t0, ctl.signal))
+      .catch((e: unknown) => log.warn(`Session ${this.cfg.id}: Interaktionsskript: ${shortError(e)}`))
+      .finally(() => this.abort.signal.removeEventListener("abort", onAbort));
+  }
+
+  private async runScript(
+    page: Page,
+    steps: InteractionStep[],
+    loop: number,
+    t0: number,
+    signal: AbortSignal
+  ): Promise<void> {
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i];
+      const wait = t0 + step.at * 1000 - Date.now();
+
+      if (wait > 0) await sleep(wait, signal);
+
+      if (signal.aborted) {
+        this.skipRest(steps, i, loop);
+        return;
+      }
+
+      this.scriptBusy = true;
+      this.stepNote = `Interaktion: ${describeStep(step)}`;
+
+      let result: InteractionResult;
+
+      try {
+        result = await this.performStep(page, step, loop, Math.round((Date.now() - t0) / 1000), signal);
+      } finally {
+        this.scriptBusy = false;
+        this.stepNote = "";
+      }
+
+      this.onInteraction(result);
+
+      if (signal.aborted) {
+        this.skipRest(steps, i + 1, loop);
+        return;
+      }
+    }
+  }
+
+  private skipRest(steps: InteractionStep[], from: number, loop: number): void {
+    // Zeit des Schritts lag hinter dem Ende: Video zu Ende (Normalfall), Durchlauf
+    // vor einer Wiederholung beendet oder die Session wurde gestoppt.
+    const note = !this.aborted
+      ? "Durchlauf vorher beendet"
+      : this.endReason === "completed"
+        ? "Video war vorher zu Ende"
+        : "Session vorher beendet";
+
+    for (let i = from; i < steps.length; i++) {
+      const s = steps[i];
+
+      this.onInteraction({
+        loop,
+        at: s.at,
+        startedAtSec: -1,
+        action: s.action,
+        value: s.value,
+        status: "skipped",
+        recoveryMs: -1,
+        note,
+      });
+    }
+  }
+
+  /** Führt genau einen Schritt aus und misst, wann die Wiedergabe wieder läuft. */
+  private async performStep(
+    page: Page,
+    step: InteractionStep,
+    loop: number,
+    startedAtSec: number,
+    signal: AbortSignal
+  ): Promise<InteractionResult> {
+    const base = { loop, at: step.at, startedAtSec, action: step.action, value: step.value };
+    const timeoutMs = LIMITS.interactionRecoveryTimeoutSec * 1000;
+    const timeoutNote = `Wiedergabe lief nicht innerhalb von ${LIMITS.interactionRecoveryTimeoutSec} s wieder.`;
+
+    const finish = (ms: number, ad: boolean, extra = ""): InteractionResult => {
+      const notes = [extra, ad ? "Werbung während der Messung" : "", ms < 0 ? timeoutNote : ""].filter(Boolean);
+
+      return {
+        ...base,
+        status: ms >= 0 ? "ok" : "failed",
+        recoveryMs: ms,
+        note: notes.length ? notes.join("; ") : undefined,
+      };
+    };
+
+    const skipped = (note: string): InteractionResult => ({
+      ...base,
+      status: "skipped",
+      recoveryMs: -1,
+      note,
+    });
+
+    try {
+      switch (step.action) {
+        case "pause": {
+          const paused = await page.evaluate(() => (window as any).__qa.pause());
+
+          if (!paused) {
+            return { ...base, status: "failed", recoveryMs: -1, note: "Pause hat nicht gegriffen." };
+          }
+
+          await sleep((step.value ?? 0) * 1000, signal);
+
+          if (signal.aborted) return skipped("Session während der Pause beendet");
+
+          const r = await page.evaluate((t: number) => (window as any).__qa.resume(t), timeoutMs);
+
+          return finish(r.ms, r.ad);
+        }
+
+        case "seek": {
+          const r = await page.evaluate(
+            ([d, t]: [number, number]) => (window as any).__qa.seekBy(d, t),
+            [step.value ?? 0, timeoutMs] as [number, number]
+          );
+
+          const extra = r.clamped ? "Sprung auf das Videoende begrenzt" : "";
+
+          return finish(r.ms, r.ad, extra);
+        }
+
+        case "next":
+        case "previous":
+          return await this.stepVideo(page, step, base, signal, timeoutMs, finish, skipped);
+      }
+    } catch (e) {
+      if (signal.aborted) return skipped("Session beendet");
+
+      return { ...base, status: "failed", recoveryMs: -1, note: shortError(e) };
+    }
+  }
+
+  /** Nächstes/vorheriges Video: Playlist über den Player, Kanal über die aufgelöste Liste. */
+  private async stepVideo(
+    page: Page,
+    step: InteractionStep,
+    base: { loop: number; at: number; startedAtSec: number; action: InteractionStep["action"]; value?: number },
+    signal: AbortSignal,
+    timeoutMs: number,
+    finish: (ms: number, ad: boolean, extra?: string) => InteractionResult,
+    skipped: (note: string) => InteractionResult
+  ): Promise<InteractionResult> {
+    const dir = step.action === "next" ? 1 : -1;
+
+    if (this.kind === "video") {
+      return skipped("Nicht anwendbar: Einzelvideo (nur bei Playlist oder Kanal).");
+    }
+
+    if (this.kind === "channel") {
+      const target = this.queueIndex + dir;
+
+      if (target < 0 || target >= this.queue.length) {
+        return skipped(dir > 0 ? "Kein weiteres Video in der Kanalliste." : "Kein vorheriges Video in der Kanalliste.");
+      }
+
+      this.queueIndex = target;
+      this.currentUrl = this.queue[target];
+
+      const t0 = Date.now();
+
+      await this.playCurrent(page);
+
+      // Gemessen wird der ganze Wechsel: Seite laden + bis die Wiedergabe läuft.
+      const loadedMs = Date.now() - t0;
+      const r = await this.waitReady(page, Math.max(5000, timeoutMs - loadedMs), signal);
+
+      return finish(r.ms < 0 ? -1 : loadedMs + r.ms, r.ad, "Seite neu geladen (Kanal)");
+    }
+
+    // Playlist
+    const before = videoIdOf(page.url());
+    const ok = await page.evaluate((d: number) => (window as any).__qa.step(d), dir);
+
+    if (!ok) await page.keyboard.press(dir > 0 ? "Shift+N" : "Shift+P").catch(() => {});
+
+    const r = await this.waitReady(page, timeoutMs, signal, () => videoIdOf(page.url()) !== before);
+
+    if (r.ms < 0 && videoIdOf(page.url()) === before) {
+      return {
+        ...base,
+        status: "failed",
+        recoveryMs: -1,
+        note: `Kein Wechsel innerhalb von ${LIMITS.interactionRecoveryTimeoutSec} s (${dir > 0 ? "letztes" : "erstes"} Video der Playlist?).`,
+      };
+    }
+
+    return finish(r.ms, r.ad);
+  }
+
+  /**
+   * Wartet, bis die Wiedergabe läuft (und die Position vorankommt). ms = Zeitpunkt des
+   * ersten "läuft" ab Aufruf; -1 = Zeitüberschreitung.
+   */
+  private async waitReady(
+    page: Page,
+    timeoutMs: number,
+    signal: AbortSignal,
+    until?: () => boolean
+  ): Promise<{ ms: number; ad: boolean }> {
+    const t0 = Date.now();
+    let since = -1;
+    let base = 0;
+    let ad = false;
+
+    while (Date.now() - t0 < timeoutMs && !signal.aborted) {
+      const st = await this.readStats(page);
+
+      if (st?.ad) ad = true;
+
+      if (st && st.state === "playing" && (!until || until())) {
+        if (since < 0) {
+          since = Date.now() - t0;
+          base = st.currentTime;
+        } else if (st.currentTime - base >= 0.25) {
+          return { ms: since, ad };
+        }
+      } else {
+        since = -1;
+      }
+
+      await sleep(100, signal);
+    }
+
+    return { ms: -1, ad };
   }
 
   /** Das aktuelle Video ist zu Ende: gibt es noch einen weiteren Eintrag im Durchlauf? */
@@ -456,6 +746,7 @@ export class SessionRunner {
       const wantHeight = qualityHeight(this.cfg.quality);
 
       if (stats?.ad) notes.push("Werbung läuft");
+      if (this.stepNote) notes.push(this.stepNote);
 
       if (
         wantHeight &&

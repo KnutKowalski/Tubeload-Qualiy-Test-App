@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { EndReason, Sample, SessionSummary } from "./types";
+import type { EndReason, InteractionResult, Sample, SessionSummary } from "./types";
 import { log } from "./log";
 
 const RESERVOIR_SIZE = 10_000;
@@ -41,6 +41,7 @@ class SessionAggregator {
 
   private qualityTime = new Map<string, number>();
   private note = "";
+  private interactions: InteractionResult[] = [];
 
   add(s: Sample): void {
     if (!this.firstTs) this.firstTs = s.ts;
@@ -73,6 +74,11 @@ class SessionAggregator {
       const q = s.quality || "unknown";
       this.qualityTime.set(q, (this.qualityTime.get(q) ?? 0) + dt);
     }
+  }
+
+  /** höchstens 50 Schritte x 10 Durchläufe */
+  addInteraction(r: InteractionResult): void {
+    if (this.interactions.length < 500) this.interactions.push(r);
   }
 
   // Reservoir-Sampling: begrenzter Speicher auch bei tagelangen Sessions.
@@ -128,6 +134,7 @@ class SessionAggregator {
       endReason,
       note: this.note,
       finishedAt: Date.now(),
+      ...(this.interactions.length ? { interactions: [...this.interactions] } : {}),
     };
   }
 }
@@ -153,6 +160,17 @@ export class SummaryStore {
     }
 
     agg.add(s);
+  }
+
+  addInteraction(sessionId: string, r: InteractionResult): void {
+    let agg = this.active.get(sessionId);
+
+    if (!agg) {
+      agg = new SessionAggregator();
+      this.active.set(sessionId, agg);
+    }
+
+    agg.addInteraction(r);
   }
 
   finish(sessionId: string, endReason: EndReason = "stopped"): SessionSummary | null {
