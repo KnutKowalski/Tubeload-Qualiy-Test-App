@@ -9,14 +9,19 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   desktop:
     name: Desktop ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
 
     steps:
       - name: Checkout
@@ -25,23 +30,38 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            desktop/core/package-lock.json
+            desktop/package-lock.json
 
+      # `npm ci` installiert exakt die Versionen aus den Lockfiles.
       - name: Install core dependencies
         working-directory: desktop/core
-        run: npm install
+        run: npm ci
+
+      - name: Typecheck core
+        working-directory: desktop/core
+        run: npm run typecheck
+
+      - name: Test core
+        if: runner.os == 'Linux'
+        working-directory: desktop/core
+        run: npm test
 
       - name: Build core
         working-directory: desktop/core
         run: npm run build
 
+      # Nur Produktions-Abhängigkeiten werden in die App gepackt.
       - name: Prune core dev dependencies
         working-directory: desktop/core
         run: npm prune --omit=dev
 
       - name: Install desktop dependencies
         working-directory: desktop
-        run: npm install
+        run: npm ci
 
       - name: Build desktop app
         working-directory: desktop
@@ -58,11 +78,13 @@ jobs:
             desktop/release/*.zip
             desktop/release/*.AppImage
             desktop/release/*.deb
-          if-no-files-found: warn
+            desktop/release/*.exe
+          if-no-files-found: error
 
   android:
     name: Android APK
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
