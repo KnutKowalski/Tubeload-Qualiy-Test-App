@@ -5,6 +5,7 @@ import type { Browser } from "playwright-core";
 import { ManagerError, SessionManager } from "../src/manager";
 import type { ProcessMonitor } from "../src/processMonitor";
 import type { SessionConfig } from "../src/types";
+import { parseSessionInput } from "../src/validate";
 
 const cfg = { id: "s1" } as SessionConfig;
 const monitor = {} as ProcessMonitor;
@@ -38,4 +39,26 @@ test("ohne Browser: no_browser, vor dem Limit-Check", () => {
   const m = new SessionManager(monitor, () => 0);
 
   assert.throws(() => m.start(cfg), (e: unknown) => e instanceof ManagerError && e.code === "no_browser");
+});
+
+test("Keine feste Obergrenze: so viele Sessions wie eingestellt starten, die nächste scheitert erst am eingestellten Wert", () => {
+  // Browser, dessen Kontext nie fertig wird: die Sessions bleiben "aktiv", ohne dass etwas läuft.
+  const browser = { newContext: () => new Promise(() => {}) } as unknown as Browser;
+  const url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
+  const configFor = (i: number) => ({ ...parseSessionInput({ url }), id: `s${i}` }) as unknown as SessionConfig;
+
+  for (const limit of [12, 40]) {
+    const m = new SessionManager(monitor, () => limit);
+
+    m.setBrowser(browser);
+
+    for (let i = 0; i < limit; i++) m.start(configFor(i));
+
+    assert.equal(m.activeCount(), limit, `${limit} parallele Sessions`);
+    assert.throws(
+      () => m.start(configFor(limit)),
+      (e: unknown) => e instanceof ManagerError && e.code === "limit" && e.message.includes(`Maximal ${limit}`)
+    );
+    assert.equal(m.activeCount(), limit);
+  }
 });

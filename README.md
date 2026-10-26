@@ -145,17 +145,24 @@ Sicherheitsprobleme bitte per GitHub-Issue (ohne Exploit-Details) oder direkt an
 Die Werte der ersten vier Zeilen lassen sich im Dashboard unter *Einstellungen* ändern. Sie gelten
 für neue Sessions und Zeitpläne (laufende Sessions ändern sich nicht), werden in `settings.json`
 gespeichert und bleiben nach einem Neustart erhalten. *Zurücksetzen* stellt die Standardwerte
-wieder her. Die **festen Obergrenzen** schützen den Rechner und lassen sich nicht überschreiten.
+wieder her. Die **festen Obergrenzen** schützen den Rechner und lassen sich nicht überschreiten;
+nur die Zahl paralleler Sessions hat keine feste Obergrenze (siehe unten).
 
 | Einstellung | Standard | Einstellbar von … bis (feste Obergrenze) |
 | --- | --- | --- |
-| Parallele Sessions | 3 (Startwert per `TB_MAX_SESSIONS`) | 1 – 10 |
+| Parallele Sessions | 3 (Startwert per `TB_MAX_SESSIONS`) | ab 1, **keine feste Obergrenze** |
 | Wiederholungen („Läufe“) | 3 (nur wenn *Wiederholen* aktiv) | 1 – 10 |
 | Laufzeit pro Session | 30 min | 1 – 240 min |
 | Mindestabstand zwischen Zeitplan-Läufen | 5 min | 1 – 60 min |
 | Zeitpläne | – | 50 (fest) |
 | Interaktionsskript | – | 50 Schritte, mind. 2 s Abstand (Pausen zählen mit), Pause 1–120 s, Sprung ±600 s (fest) |
 | Android: Wiederholungen / Laufzeit | 3 / 30 min (Felder in der App) | 1 – 10 / 1 – 240 min |
+
+**Parallele Sessions:** Du legst die Zahl selbst fest und kannst sie je nach Auslastung jederzeit im
+Dashboard ändern (gilt für neue Starts, laufende Sessions bleiben unberührt). Jede Session ist ein
+eigener Browser-Kontext mit Video-Wiedergabe und braucht Arbeitsspeicher und CPU; bei hohen Werten
+den Rechner beobachten. YouTube kann viele gleichzeitige Sitzungen von einer Adresse als
+Bot-Verkehr einstufen – dann meldet die Session `blocked` (es gibt keine Umgehung).
 
 Zeitpläne dürfen nie häufiger als im Minutentakt laufen (Sekunden-Crons werden abgelehnt). Wird der
 Mindestabstand später erhöht, bleiben bestehende Zeitpläne erhalten; er gilt für neue.
@@ -169,7 +176,7 @@ Mindestabstand später erhöht, bleiben bestehende Zeitpläne erhalten; er gilt 
 | `TB_CHROME_PATH` | Pfad zu Chrome/Chromium/Edge. |
 | `TB_HEADLESS` | `0` zeigt das Browserfenster (Fehlersuche). |
 | `TB_DATA_DIR` | Datenordner (`samples.csv`, `summaries.json`, `schedules.json`, `settings.json`, `recent-urls.json`). |
-| `TB_MAX_SESSIONS` | Startwert für parallele Sessions (1–10); der Wert in den Einstellungen hat Vorrang, sobald er gespeichert wurde. |
+| `TB_MAX_SESSIONS` | Startwert für parallele Sessions (ganze Zahl ab 1, keine Obergrenze); der Wert in den Einstellungen hat Vorrang, sobald er gespeichert wurde. |
 | `TB_LOG_LEVEL` | `debug`, `info`, `warn`, `error`. |
 
 `samples.csv` wird ab einer Größe von 50 MB rotiert; Zusammenfassungen, Zeitpläne, Einstellungen und

@@ -20,14 +20,17 @@ test("Standardwerte entsprechen der Dokumentation (3 Läufe, 30 Min., 3 Sessions
   });
 });
 
-test("TB_MAX_SESSIONS bestimmt nur den Startwert, nie mehr als die feste Obergrenze", () => {
+test("TB_MAX_SESSIONS bestimmt den Startwert; es gibt keine feste Obergrenze", () => {
   assert.equal(defaultSettings({ TB_MAX_SESSIONS: "6" }).maxSessions, 6);
-  assert.equal(defaultSettings({ TB_MAX_SESSIONS: "99" }).maxSessions, LIMITS.hardMaxSessions);
+  assert.equal(defaultSettings({ TB_MAX_SESSIONS: "99" }).maxSessions, 99);
+  assert.equal(defaultSettings({ TB_MAX_SESSIONS: "2500" }).maxSessions, 2500);
+  assert.equal(defaultSettings({ TB_MAX_SESSIONS: "1e400" }).maxSessions, 3, "unendlich → Standard");
+  assert.equal(defaultSettings({ TB_MAX_SESSIONS: "1e300" }).maxSessions, 3, "keine sichere ganze Zahl → Standard");
   assert.equal(defaultSettings({ TB_MAX_SESSIONS: "abc" }).maxSessions, 3);
 });
 
 test("Obergrenzen sind fest und aus LIMITS abgeleitet", () => {
-  assert.deepEqual(SETTING_BOUNDS.maxSessions, { min: 1, max: 10 });
+  assert.deepEqual(SETTING_BOUNDS.maxSessions, { min: 1, max: null });
   assert.deepEqual(SETTING_BOUNDS.defaultLoops, { min: 1, max: 10 });
   assert.deepEqual(SETTING_BOUNDS.defaultRuntimeMin, { min: 1, max: 240 });
   assert.deepEqual(SETTING_BOUNDS.minScheduleIntervalMin, { min: 1, max: 60 });
@@ -56,8 +59,10 @@ test("update: ungültige Werte werden abgelehnt, ohne etwas zu ändern", () => {
 
   const bad: unknown[] = [
     { maxSessions: 0 },
-    { maxSessions: 11 },
+    { maxSessions: -4 },
     { maxSessions: 2.5 },
+    { maxSessions: 1e300 },
+    { maxSessions: Number.POSITIVE_INFINITY },
     { maxSessions: "3" },
     { maxSessions: Number.NaN },
     { defaultLoops: 11 },
@@ -135,4 +140,24 @@ test("Schreibfehler: update/reset melden den Fehler und übernehmen nichts (kein
   assert.deepEqual(s.get(), before, "Wert darf sich nicht geändert haben");
   assert.throws(() => s.reset(), StorageError);
   assert.equal(changes, 0, "kein change-Ereignis bei Fehler");
+});
+
+test("Parallele Sessions: beliebig hohe Werte sind erlaubt, die übrigen Obergrenzen bleiben", () => {
+  const s = new SettingsStore(undefined, defaultSettings({}));
+
+  for (const n of [10, 11, 50, 500, 100_000]) {
+    assert.equal(s.update({ maxSessions: n }).maxSessions, n, String(n));
+  }
+
+  assert.throws(() => s.update({ maxSessions: 0 }), ValidationError);
+  assert.throws(() => s.update({ defaultLoops: 11 }), ValidationError, "Läufe bleiben begrenzt");
+  assert.throws(() => s.update({ defaultRuntimeMin: 241 }), ValidationError, "Laufzeit bleibt begrenzt");
+});
+
+test("Gespeicherter Wert über 10 überlebt einen Neustart", () => {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "tb-set-")), "settings.json");
+
+  new SettingsStore(file, defaultSettings({})).update({ maxSessions: 40 });
+
+  assert.equal(new SettingsStore(file, defaultSettings({})).get().maxSessions, 40);
 });

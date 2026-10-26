@@ -2,9 +2,11 @@
  * Zentrale Grenzwerte. Sie schützen den Rechner (Ressourcen) und verhindern,
  * dass ein einzelner Fehlgriff (z. B. Cron "* * * * *" ohne Laufzeit) beliebig
  * viele Browser-Sessions erzeugt. Die Werte hier sind die FESTEN Obergrenzen bzw.
- * Standardwerte; Läufe, Laufzeit, parallele Sessions und Zeitplan-Abstand stellt der
- * Nutzer in den Einstellungen ein (siehe settings.ts), nie über diese Obergrenzen hinaus.
- * TB_MAX_SESSIONS liefert nur den Startwert für parallele Sessions.
+ * Standardwerte; Läufe, Laufzeit und Zeitplan-Abstand stellt der Nutzer in den
+ * Einstellungen ein (siehe settings.ts), nie über diese Obergrenzen hinaus.
+ * Die Zahl paralleler Sessions hat bewusst KEINE feste Obergrenze: sie richtet sich nach
+ * der Auslastung des Rechners und wird in den Einstellungen frei gewählt.
+ * TB_MAX_SESSIONS liefert nur den Startwert dafür.
  */
 export const LIMITS = {
   maxUrlLength: 2048,
@@ -28,7 +30,6 @@ export const LIMITS = {
   missedRunGraceMs: 5 * 60 * 1000,
 
   defaultMaxSessions: 3,
-  hardMaxSessions: 10,
 
   maxChannelVideos: 25,
   maxBodyBytes: 64 * 1024,
@@ -53,5 +54,7 @@ export function configuredMaxSessions(
 
   if (!Number.isFinite(n) || n < 1) return LIMITS.defaultMaxSessions;
 
-  return Math.min(Math.floor(n), LIMITS.hardMaxSessions);
+  const whole = Math.floor(n);
+
+  return Number.isSafeInteger(whole) ? whole : LIMITS.defaultMaxSessions;
 }

@@ -356,7 +356,7 @@
 
   <form id="settingsForm" class="row">
     <label class="setting"><span>Parallele Sessions</span>
-      <input class="num" name="maxSessions" type="number" min="1" max="10" step="1" required />
+      <input class="num" name="maxSessions" type="number" min="1" step="1" required />
     </label>
     <label class="setting"><span>Standard-Läufe</span>
       <input class="num" name="defaultLoops" type="number" min="1" max="10" step="1" required />
@@ -1033,7 +1033,10 @@
 
         if (bounds) {
           input.min = bounds.min;
-          input.max = bounds.max;
+
+          // max: null = keine feste Obergrenze (parallele Sessions)
+          if (bounds.max === null) input.removeAttribute("max");
+          else input.max = bounds.max;
         }
       }
 
@@ -1054,8 +1057,10 @@
         $("settingsNote").textContent =
           "Die Einstellungen gelten für neue Sessions und Zeitpläne und bleiben nach dem Schließen der App erhalten. " +
           "Bereits laufende Sessions ändern sich nicht. " +
-          `Feste Obergrenzen zum Schutz des Rechners: ${b.maxSessions.max} Sessions, ` +
-          `${b.defaultLoops.max} Läufe, ${b.defaultRuntimeMin.max} Minuten Laufzeit.`;
+          `Feste Obergrenzen zum Schutz des Rechners: ${b.defaultLoops.max} Läufe, ` +
+          `${b.defaultRuntimeMin.max} Minuten Laufzeit. ` +
+          "Die Zahl paralleler Sessions ist frei wählbar – jede Session startet einen eigenen " +
+          "Browser-Kontext und braucht Arbeitsspeicher und CPU; bei hohen Werten die Auslastung des Rechners beobachten.";
       }
 
       updateStats();
