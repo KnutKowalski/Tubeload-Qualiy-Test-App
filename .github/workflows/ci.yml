@@ -37,9 +37,19 @@ jobs:
         working-directory: desktop/core
         run: npm run typecheck
 
+      # Ohne Browser würden die E2E-Tests sonst stillschweigend übersprungen.
+      # TB_REQUIRE_BROWSER lässt sie dann fehlschlagen statt zu überspringen.
+      - name: Browser für E2E-Tests bereitstellen
+        working-directory: desktop/core
+        run: npx playwright-core install chromium
+
       - name: Test
         working-directory: desktop/core
-        run: npm test
+        env:
+          TB_REQUIRE_BROWSER: "1"
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee test-output.txt || { echo "::error title=Tests fehlgeschlagen::$(grep -E '^not ok' test-output.txt | head -5 | tr '\n' ' ')"; exit 1; }
 
       - name: Build
         working-directory: desktop/core

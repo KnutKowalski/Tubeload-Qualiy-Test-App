@@ -4,7 +4,7 @@ import fs from "node:fs";
 import { LIMITS, configuredMaxSessions } from "./limits";
 import { log } from "./log";
 import { errorMessage, writeJsonAtomic } from "./util";
-import { ValidationError } from "./errors";
+import { StorageError, ValidationError } from "./errors";
 import type { SessionDefaults } from "./validate";
 
 /**
@@ -120,16 +120,27 @@ export class SettingsStore extends EventEmitter {
       if (o[key] !== undefined) next[key] = checkValue(key, o[key]);
     }
 
-    this.current = next;
-    this.save();
-    this.emit("change", this.get());
-
-    return this.get();
+    return this.commit(next);
   }
 
   reset(): Settings {
-    this.current = { ...this.defaults };
-    this.save();
+    return this.commit({ ...this.defaults });
+  }
+
+  /** Übernimmt die Werte erst, wenn sie gespeichert sind: kein vorgetäuschter Erfolg. */
+  private commit(next: Settings): Settings {
+    const previous = this.current;
+
+    this.current = next;
+
+    try {
+      this.save();
+    } catch (e) {
+      this.current = previous;
+
+      throw new StorageError(`Einstellungen konnten nicht gespeichert werden: ${errorMessage(e)}`);
+    }
+
     this.emit("change", this.get());
 
     return this.get();
@@ -165,10 +176,6 @@ export class SettingsStore extends EventEmitter {
   private save(): void {
     if (!this.file) return;
 
-    try {
-      writeJsonAtomic(this.file, this.current);
-    } catch (e) {
-      log.error("settings.json konnte nicht gespeichert werden", e);
-    }
+    writeJsonAtomic(this.file, this.current);
   }
 }

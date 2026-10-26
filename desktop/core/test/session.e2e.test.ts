@@ -35,6 +35,7 @@ interface MediaServer {
 /** failFrom: ab dem n-ten Seitenaufruf wird die Verbindung hart getrennt. */
 function startMediaServer(failFrom = Infinity): Promise<MediaServer> {
   let hits = 0;
+  const hung: http.ServerResponse[] = [];
 
   const server = http.createServer((req, res) => {
     if (req.url === "/page.html") {
@@ -47,6 +48,12 @@ function startMediaServer(failFrom = Infinity): Promise<MediaServer> {
 
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       res.end(PAGE_WITH_VIDEO);
+      return;
+    }
+
+    if (req.url === "/hang.html") {
+      // antwortet nie: simuliert einen hängenden Server beim Seitenladen
+      hung.push(res);
       return;
     }
 
@@ -133,6 +140,9 @@ function config(url: string, over: Partial<SessionConfig> = {}): SessionConfig {
 function e2e(name: string, fn: () => Promise<void>): void {
   test(name, { timeout: 90_000 }, async (t) => {
     if (!browser) {
+      // In der CI (TB_REQUIRE_BROWSER=1) ist ein fehlender Browser ein Fehler und kein stilles Überspringen.
+      if (process.env.TB_REQUIRE_BROWSER) assert.fail("Kein Chromium/Chrome verfügbar, aber TB_REQUIRE_BROWSER ist gesetzt");
+
       t.skip("Kein Chromium/Chrome verfügbar");
       return;
     }
@@ -438,6 +448,92 @@ e2e("Interaktionsskript: stop() beendet auch eine laufende Pause sofort", async 
     assert.equal(runner.endReason, "stopped");
     assert.equal(results.length, 1);
     assert.equal(results[0].status, "skipped");
+  } finally {
+    await media.close();
+  }
+});
+
+e2e("Stopp wirkt sofort, auch wenn die Seite gerade lädt (hängender Server)", async () => {
+  const media = await startMediaServer();
+
+  try {
+    const runner = new SessionRunner(
+      config(media.url("/hang.html"), { maxRuntimeSec: 3600 }),
+      browser!,
+      monitor,
+      () => {}
+    );
+
+    const done = runner.run();
+
+    await new Promise((r) => setTimeout(r, 2000));
+
+    const t0 = Date.now();
+    runner.stop();
+    await done;
+
+    assert.equal(runner.endReason, "stopped");
+    // Früher wartete run() hier bis zum Ablauf des 60-s-Ladetimeouts.
+    assert.ok(Date.now() - t0 < 8_000, `Stopp dauerte ${Date.now() - t0} ms`);
+  } finally {
+    await media.close();
+  }
+});
+
+e2e("Der echte Laufzeit-Timer beendet die Session mit max_runtime (ohne stop() von außen)", async () => {
+  const media = await startMediaServer();
+
+  try {
+    const runner = new SessionRunner(
+      config(media.url("/page.html"), { repeat: true, maxLoops: 10, maxRuntimeSec: 3 }),
+      browser!,
+      monitor,
+      () => {}
+    );
+
+    const t0 = Date.now();
+    await runner.run();
+
+    assert.equal(runner.endReason, "max_runtime");
+    assert.ok(Date.now() - t0 < 12_000, `endete erst nach ${Date.now() - t0} ms`);
+  } finally {
+    await media.close();
+  }
+});
+
+e2e("Nach dem Ende einer Session werden keine Messwerte mehr gemeldet (langsamer Prozess-Monitor)", async () => {
+  const media = await startMediaServer();
+
+  // Ein Monitor, der länger als eine Sekunde braucht (z. B. Windows): die Messung läuft beim Stopp noch.
+  const slowMonitor = {
+    snapshot: async () => {
+      await new Promise((r) => setTimeout(r, 700));
+
+      return { cpu: 0, memBytes: 0 };
+    },
+  } as unknown as ProcessMonitor;
+
+  try {
+    const samples: Sample[] = [];
+    const runner = new SessionRunner(
+      config(media.url("/page.html"), { repeat: true, maxLoops: 10 }),
+      browser!,
+      slowMonitor,
+      (s) => samples.push(s)
+    );
+
+    const done = runner.run();
+
+    await until(() => samples.some((s) => s.state === "playing"), 20_000, "Wiedergabe startet");
+
+    runner.stop();
+    await done;
+
+    const n = samples.length;
+
+    await new Promise((r) => setTimeout(r, 1500));
+
+    assert.equal(samples.length, n, "nach run() darf kein Sample mehr eintreffen");
   } finally {
     await media.close();
   }

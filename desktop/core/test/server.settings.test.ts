@@ -235,7 +235,7 @@ test("Gespeicherte URLs: ein ungültiger Start speichert nichts; ein Zeitplan sp
 });
 
 test("Dashboard enthält Einstellungen und speichert keine URLs mehr im Browser-Speicher", async () => {
-  const html = (await request(port, { path: "/" })).body;
+  const html = (await request(port, { path: `/?token=${TOKEN}` })).body;
 
   assert.match(html, /id="settingsForm"/);
   assert.match(html, /name="maxSessions"/);

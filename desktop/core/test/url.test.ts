@@ -5,6 +5,7 @@ import {
   channelVideosUrl,
   detectUrlKind,
   isAllowedYouTubeUrl,
+  startUrlFor,
   toWatchPlaylistUrl,
   videoIdOf,
 } from "../src/url";
@@ -77,4 +78,36 @@ test("videoIdOf und toWatchPlaylistUrl", () => {
     toWatchPlaylistUrl("PL 1", 1),
     "https://www.youtube.com/watch?list=PL%201&index=1"
   );
+});
+
+test("startUrlFor: nur die Playlist-Übersicht wird zur Wiedergabeseite, alles andere bleibt", () => {
+  assert.equal(
+    startUrlFor("https://www.youtube.com/playlist?list=PLabc", "playlist"),
+    "https://www.youtube.com/watch?list=PLabc&index=1"
+  );
+  assert.equal(
+    startUrlFor("https://music.youtube.com/playlist?list=OLAK5uy_x&si=1", "playlist"),
+    "https://www.youtube.com/watch?list=OLAK5uy_x&index=1"
+  );
+
+  for (const [u, kind] of [
+    ["https://www.youtube.com/watch?v=abc&list=PLabc", "playlist"],
+    ["https://www.youtube.com/watch?list=PLabc", "playlist"],
+    ["https://www.youtube.com/playlist", "playlist"],
+    ["https://www.youtube.com/playlist?list=PLabc", "video"],
+    ["https://www.youtube.com/@name", "channel"],
+    ["kein url", "playlist"],
+  ] as const) {
+    assert.equal(startUrlFor(u, kind), u, `${kind} ${u}`);
+  }
+});
+
+test("detectUrlKind: Kurz-/Shorts-/Embed-Adressen ohne Video-ID sind nicht abspielbar", () => {
+  assert.equal(detectUrlKind("https://youtu.be/abcdefghijk"), "video");
+  assert.equal(detectUrlKind("https://www.youtube.com/shorts/abcdefghijk"), "video");
+  assert.equal(detectUrlKind("https://www.youtube.com/embed/abcdefghijk"), "video");
+
+  for (const u of ["https://youtu.be", "https://youtu.be/", "https://www.youtube.com/shorts/", "https://www.youtube.com/embed/"]) {
+    assert.equal(detectUrlKind(u), "unknown", u);
+  }
 });

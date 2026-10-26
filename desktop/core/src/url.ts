@@ -40,11 +40,11 @@ export function detectUrlKind(raw: string, forced: UrlKind = "auto"): UrlKind {
 
   if (path.startsWith("/playlist") || list) return "playlist";
 
+  // Ohne Video-ID (z. B. nur "https://youtu.be/") gibt es nichts abzuspielen.
   if (
     v ||
-    u.hostname === "youtu.be" ||
-    path.startsWith("/shorts/") ||
-    path.startsWith("/embed/")
+    (u.hostname === "youtu.be" && /^\/[^/]+/.test(path)) ||
+    /^\/(shorts|embed)\/[^/]+/.test(path)
   ) {
     return "video";
   }
@@ -87,6 +87,23 @@ export function toWatchPlaylistUrl(playlistId: string, index = 1): string {
   return `https://www.youtube.com/watch?list=${encodeURIComponent(
     playlistId
   )}&index=${index}`;
+}
+
+/**
+ * Adresse, mit der der erste Durchlauf beginnt. Die Playlist-Übersicht
+ * (/playlist?list=…) enthält keinen Player; dafür wird – wie bei Wiederholungen –
+ * die Wiedergabeseite der Playlist geladen. Alle anderen URLs bleiben unverändert.
+ */
+export function startUrlFor(raw: string, kind: UrlKind): string {
+  if (kind !== "playlist") return raw;
+
+  const u = parseUrl(raw);
+
+  if (!u || u.searchParams.get("v") || !u.pathname.startsWith("/playlist")) return raw;
+
+  const list = u.searchParams.get("list");
+
+  return list ? toWatchPlaylistUrl(list, 1) : raw;
 }
 
 /**

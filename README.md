@@ -49,15 +49,20 @@ npm run build
 
 cd ..
 npm ci
-npm start           # Electron-App (baut vorher: npm run build:core)
+npm run build:core  # baut den Core (einmalig bzw. nach Änderungen im Core)
+npm start           # startet die Electron-App; sie nutzt den gebauten Core
 ```
 
 Core ohne Electron (z. B. auf einem Server):
 
 ```bash
 cd desktop/core
-npm run dev         # gibt http://127.0.0.1:7777 aus; Token siehe unten
+npm run dev         # im Terminal wird die vollständige Adresse samt ?token=… ausgegeben
 ```
+
+Das Dashboard liefert der Core nur mit gültigem Token aus (`/?token=…`, siehe *Sicherheit*). In
+Electron macht die App das selbst; beim Betrieb ohne Electron die ausgegebene Adresse verwenden
+oder mit `TB_TOKEN` ein eigenes Token setzen.
 
 ## Bedienung
 
@@ -123,7 +128,8 @@ die zuletzt verwendeten URLs (Liste per Antippen des URL-Feldes) bleiben nach de
 
 - Der Core lauscht nur auf `127.0.0.1`.
 - Jede Anfrage braucht ein zufälliges **Token** (`x-tb-token`-Header bzw. `?token=` beim WebSocket).
-  Das Dashboard bekommt es beim Laden eingesetzt. Zusätzlich werden `Host` und `Origin` geprüft
+  Auch das Dashboard selbst (`GET /`) wird nur mit gültigem Token ausgeliefert (`?token=` oder
+  Header) und bekommt es dann eingesetzt; ohne Token antwortet der Core mit 401. Zusätzlich werden `Host` und `Origin` geprüft
   (Schutz vor DNS-Rebinding und fremden Webseiten). Es gibt bewusst keine CORS-Freigabe.
 - Erlaubt sind nur `https`-URLs von `youtube.com`, `www./m./music.youtube.com` und `youtu.be`.
 - Eingaben werden streng validiert, Request-Größe ist begrenzt, das Dashboard läuft unter
@@ -177,6 +183,11 @@ anderen Port.)
   nach YouTube-Änderungen Anpassungen brauchen. Bei einer Bot-/Anmeldeprüfung bricht die Session ab
   und meldet `blocked`; es gibt keine Umgehung.
 - Die Builds sind unsigniert (siehe oben); ein Auto-Update gibt es nicht.
+- Das geordnete Beenden des Cores beim Schließen der App läuft über einen IPC-Kanal. Unter Windows,
+  macOS und Linux ist er vorgesehen, getestet wurde das Verhalten aber nur unter Linux; bei Hängern
+  beendet die App den Core nach 25 s hart.
+- Die Interaktionsschritte *next* und *previous* hängen vom YouTube-Player ab; bei Einzelvideos ohne
+  Playlist werden sie übersprungen und als „skipped“ im Protokoll vermerkt.
 - Der Android-Build ist ein Debug-APK und nicht für den Play Store vorbereitet.
 
 ## Lizenz

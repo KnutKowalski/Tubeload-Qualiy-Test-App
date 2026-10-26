@@ -2,7 +2,7 @@ import fs from "node:fs";
 
 import { LIMITS } from "./limits";
 import { log } from "./log";
-import { isAllowedYouTubeUrl } from "./url";
+import { detectUrlKind, isAllowedYouTubeUrl } from "./url";
 import { writeJsonAtomic } from "./util";
 import { ValidationError } from "./validate";
 
@@ -66,6 +66,11 @@ export class RecentUrls {
       );
     }
 
+    // Nur URLs merken, mit denen sich auch eine Session starten lässt.
+    if (detectUrlKind(url) === "unknown") {
+      throw new ValidationError("Die URL konnte nicht als Video, Playlist oder Kanal erkannt werden.");
+    }
+
     return url;
   }
 
@@ -86,7 +91,12 @@ export class RecentUrls {
 
         const url = item.trim();
 
-        if (seen.has(url) || url.length > LIMITS.maxUrlLength || !isAllowedYouTubeUrl(url)) {
+        if (
+          seen.has(url) ||
+          url.length > LIMITS.maxUrlLength ||
+          !isAllowedYouTubeUrl(url) ||
+          detectUrlKind(url) === "unknown"
+        ) {
           continue;
         }
 

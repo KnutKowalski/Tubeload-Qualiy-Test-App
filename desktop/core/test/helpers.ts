@@ -64,6 +64,13 @@ function chromeCandidates(): string[] {
     }
   }
 
+  // Systeminstallationen (z. B. GitHub-Runner, Entwicklerrechner)
+  out.push(
+    ...(process.platform === "darwin"
+      ? ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"]
+      : ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium", "/usr/bin/chromium-browser"])
+  );
+
   return out.filter((p) => fs.existsSync(p));
 }
 
@@ -84,6 +91,12 @@ export async function launchTestBrowser(): Promise<Browser | null> {
 
   try {
     return await chromium.launch({ channel: "chrome", headless: true, args });
+  } catch {
+    // weiter mit dem von Playwright selbst installierten Chromium
+  }
+
+  try {
+    return await chromium.launch({ headless: true, args });
   } catch {
     return null;
   }

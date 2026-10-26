@@ -20,6 +20,7 @@ import {
 } from "./settings";
 import type { SummaryStore } from "./aggregator";
 import type { EndReason, InteractionResult, Sample, SessionSummary } from "./types";
+import { StorageError } from "./errors";
 import { parseSessionInput, ValidationError } from "./validate";
 
 export interface ServerDeps {
@@ -135,6 +136,15 @@ function pathId(segment: string | undefined): string {
   return id;
 }
 
+function escapeHtmlAttribute(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
 function tokenMatches(provided: string | undefined, token: string): boolean {
   if (!provided) return false;
 
@@ -210,9 +220,11 @@ export function startServer(deps: ServerDeps): RunningServer {
 
     const nonce = crypto.randomBytes(16).toString("base64");
 
+    // Funktionen als Ersatz: ein String würde "$&", "$$" usw. im Token auswerten.
+    // Das Token steht in einem HTML-Attribut und wird deshalb maskiert.
     const html = dashboardTemplate
-      .replaceAll("{{NONCE}}", nonce)
-      .replaceAll("{{TOKEN}}", token);
+      .replaceAll("{{NONCE}}", () => nonce)
+      .replaceAll("{{TOKEN}}", () => escapeHtmlAttribute(token));
 
     res.statusCode = 200;
     res.setHeader("Content-Type", "text/html; charset=utf-8");
@@ -379,6 +391,15 @@ export function startServer(deps: ServerDeps): RunningServer {
     }
 
     if (p === "/" && method === "GET") {
+      // Das Dashboard enthält das API-Token und wird deshalb nur mit Token ausgeliefert
+      // (die App öffnet "/?token=…"). Sonst könnte jeder lokale Prozess es per GET abholen.
+      if (!tokenMatches(tokenFrom(req, url), token)) {
+        throw new HttpError(
+          401,
+          "Token fehlt oder ist falsch. Das Dashboard bitte über die App öffnen oder die Adresse mit ?token=… verwenden."
+        );
+      }
+
       dashboardHtml(res);
       return;
     }
@@ -579,6 +600,12 @@ export function startServer(deps: ServerDeps): RunningServer {
 
       if (e instanceof ManagerError) {
         sendJson(res, MANAGER_STATUS[e.code] ?? 500, { ok: false, error: e.message });
+        return;
+      }
+
+      if (e instanceof StorageError) {
+        log.error(`Speichern fehlgeschlagen bei ${req.method} ${req.url}`, e);
+        sendJson(res, 500, { ok: false, error: e.message });
         return;
       }
 

@@ -6,7 +6,7 @@ import { acceptConsent } from "./consent";
 import { resolveChannelVideos } from "./channelResolver";
 import { log } from "./log";
 import type { ProcessMonitor } from "./processMonitor";
-import { detectUrlKind, extractPlaylistId, toWatchPlaylistUrl, videoIdOf } from "./url";
+import { detectUrlKind, extractPlaylistId, startUrlFor, toWatchPlaylistUrl, videoIdOf } from "./url";
 import { LIMITS } from "./limits";
 import { qualityHeight, shortError, sleep, viewportFor } from "./util";
 import type {
@@ -56,6 +56,10 @@ export class SessionRunner {
   private sampler?: NodeJS.Timeout;
   private runtimeTimer?: NodeJS.Timeout;
   private sampling = false;
+  /** Gesetzt, sobald run() beendet wird: danach werden keine Messwerte mehr gemeldet. */
+  private finished = false;
+  /** Seitenwechsel laufen nacheinander (Wiedergabeschleife und Skript). */
+  private navLock: Promise<void> = Promise.resolve();
 
   private lastTaskDuration = 0;
   private lastPerfTs = Date.now();
@@ -83,7 +87,7 @@ export class SessionRunner {
     private onInteraction: (r: InteractionResult) => void = () => {}
   ) {
     this.kind = detectUrlKind(cfg.url, cfg.kind);
-    this.currentUrl = cfg.url;
+    this.currentUrl = startUrlFor(cfg.url, this.kind);
   }
 
   /** Beendet die Session von außen (Benutzer, Shutdown). Der erste Grund gewinnt. */
@@ -107,6 +111,17 @@ export class SessionRunner {
       viewport: viewportFor(this.cfg.quality),
       deviceScaleFactor: 1,
     });
+
+    // Ein Abbruch (Stopp, Laufzeitende, Fehler) schließt den Browser-Kontext sofort. Damit
+    // enden auch hängende Seitenladevorgänge (bis 60 s) und Auswertungen im Browser, die
+    // sich selbst nicht abbrechen lassen.
+    const closeNow = (): void => {
+      void context.close().catch(() => {});
+    };
+
+    this.abort.signal.addEventListener("abort", closeNow, { once: true });
+
+    if (this.aborted) closeNow();
 
     try {
       // Dev-Modus (tsx/esbuild) injiziert __name() in serialisierte Funktionen.
@@ -155,14 +170,16 @@ export class SessionRunner {
 
       throw e;
     } finally {
+      this.finished = true;
+
       if (this.sampler) clearInterval(this.sampler);
       if (this.runtimeTimer) clearTimeout(this.runtimeTimer);
 
-      // Offene Skriptschritte als "übersprungen" melden, bevor die Session als beendet gilt.
+      // Zuerst den Kontext schließen: so enden auch Skriptschritte, die gerade im Browser
+      // warten, sofort und melden sich als "übersprungen", bevor die Session als beendet gilt.
       this.scriptCtl?.abort();
-      await this.scriptDone;
-
       await context.close().catch(() => {});
+      await this.scriptDone;
     }
   }
 
@@ -401,7 +418,11 @@ export class SessionRunner {
             [step.value ?? 0, timeoutMs] as [number, number]
           );
 
-          const extra = r.clamped ? "Sprung auf das Videoende begrenzt" : "";
+          const extra = r.clamped
+            ? r.to <= 0
+              ? "Sprung auf den Videoanfang begrenzt"
+              : "Sprung auf das Videoende begrenzt"
+            : "";
 
           return finish(r.ms, r.ad, extra);
         }
@@ -590,13 +611,37 @@ export class SessionRunner {
     this.currentUrl = this.queue[0];
   }
 
-  private async playCurrent(page: Page): Promise<void> {
-    await page.goto(this.currentUrl, {
-      waitUntil: "domcontentloaded",
-      timeout: 60000,
+  /**
+   * Seitenwechsel laufen nacheinander: Wiedergabeschleife (Videoende, Wiederholung) und
+   * Interaktionsskript (next/previous im Kanal) dürfen nie gleichzeitig navigieren, sonst
+   * bricht die eine Navigation die andere ab und die Session endet mit einem Fehler.
+   */
+  private async exclusiveNav<T>(fn: () => Promise<T>): Promise<T> {
+    const previous = this.navLock;
+    let release!: () => void;
+
+    this.navLock = new Promise<void>((resolve) => {
+      release = resolve;
     });
 
-    await this.prepare(page);
+    await previous;
+
+    try {
+      return await fn();
+    } finally {
+      release();
+    }
+  }
+
+  private playCurrent(page: Page): Promise<void> {
+    return this.exclusiveNav(async () => {
+      await page.goto(this.currentUrl, {
+        waitUntil: "domcontentloaded",
+        timeout: 60000,
+      });
+
+      await this.prepare(page);
+    });
   }
 
   private async prepare(page: Page): Promise<void> {
@@ -609,7 +654,8 @@ export class SessionRunner {
         .catch(() => {});
     }
 
-    // Die Wartezeit auf das Video-Element zählt zur Startfrist (höchstens 30 s).
+    // Wartezeit auf das Video-Element: höchstens 30 s. Die eigentliche Startfrist
+    // (startTimeoutSec) beginnt danach in waitForPlayback().
     await page
       .waitForSelector("video", {
         timeout: Math.min(30_000, this.cfg.startTimeoutSec * 1000),
@@ -747,6 +793,10 @@ export class SessionRunner {
 
       if (stats?.ad) notes.push("Werbung läuft");
       if (this.stepNote) notes.push(this.stepNote);
+
+      // Die Session wurde während der Messung beendet: nichts mehr melden (sonst bleibt im
+      // Dashboard eine Geisterzeile stehen und die Auswertung bekommt verwaiste Werte).
+      if (this.finished) return;
 
       if (
         wantHeight &&

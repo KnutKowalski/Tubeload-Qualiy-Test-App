@@ -77,6 +77,9 @@ class MainActivity : AppCompatActivity() {
 
     private var pendingConfig: String? = null
 
+    /** true, wenn das Laden der Seite fehlgeschlagen ist: dann wird nichts injiziert. */
+    private var loadFailed = false
+
     private val mainHandler = Handler(Looper.getMainLooper())
 
     /**
@@ -157,6 +160,9 @@ class MainActivity : AppCompatActivity() {
                 super.onReceivedError(view, request, error)
 
                 if (request?.isForMainFrame == true) {
+                    loadFailed = true
+                    pendingConfig = null
+
                     runOnUiThread {
                         status.text = "Ladefehler: ${error?.description ?: "unbekannt"}"
                     }
@@ -165,6 +171,10 @@ class MainActivity : AppCompatActivity() {
 
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
+
+                // Nach einem Ladefehler feuert onPageFinished ebenfalls (Fehlerseite): die
+                // Fehlermeldung darf nicht durch einen Startversuch überschrieben werden.
+                if (loadFailed) return
 
                 val cfg = pendingConfig ?: return
                 pendingConfig = null
@@ -402,10 +412,16 @@ class MainActivity : AppCompatActivity() {
                 "quality_change" -> "Qualitaet: %s".format(o.optString("quality", "?"))
                 "not_playing" ->
                     "Keine Wiedergabe: %s".format(o.optString("detail", "unbekannt"))
-                "error" -> "Fehler: %s (%s)".format(
-                    o.optString("error", "?"),
-                    o.optString("detail", "")
-                )
+                "error" -> {
+                    // player.html liefert je nach Fehler "detail" oder "hint".
+                    val detail = o.optString("detail", "").ifEmpty { o.optString("hint", "") }
+
+                    if (detail.isEmpty()) {
+                        "Fehler: %s".format(o.optString("error", "?"))
+                    } else {
+                        "Fehler: %s (%s)".format(o.optString("error", "?"), detail)
+                    }
+                }
                 else -> "Status: %s".format(o.optString("state", payload))
             }
         } catch (e: Exception) {
@@ -464,6 +480,7 @@ class MainActivity : AppCompatActivity() {
             .toString()
 
         pendingConfig = cfg
+        loadFailed = false
         web.loadUrl("https://$ASSET_HOST/assets/player.html")
     }
 

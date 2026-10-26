@@ -80,13 +80,32 @@ test("CsvWriter: rotiert bei Größenlimit", async () => {
   }
 });
 
-test("CsvWriter: Schreibfehler crasht den Prozess nicht", async () => {
+test("CsvWriter: Schreibfehler crasht den Prozess nicht, deaktiviert den Export und close() kehrt zurück", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tb-csv-"));
-  const w = new CsvWriter(path.join(dir, "samples.csv"));
+  const file = path.join(dir, "samples.csv");
+  const w = new CsvWriter(file);
 
-  fs.rmSync(dir, { recursive: true, force: true });
+  w.append(sample());
+
+  const internals = w as unknown as { stream: fs.WriteStream; broken: boolean };
+
+  assert.equal(internals.broken, false);
+
+  // Platte voll o. Ä.: der Stream meldet einen Fehler. Ohne Error-Handler wäre das ein Absturz.
+  internals.stream.destroy(new Error("Platte voll (Test)"));
+  await new Promise((r) => setTimeout(r, 50));
+
+  assert.equal(internals.broken, true, "Export muss deaktiviert sein");
+
+  const sizeBefore = fs.statSync(file).size;
+
   for (let i = 0; i < 5; i++) w.append(sample());
 
-  await new Promise((r) => setTimeout(r, 100));
-  await w.close();
+  assert.equal(fs.statSync(file).size, sizeBefore, "nach dem Fehler wird nichts mehr geschrieben");
+
+  // close() darf beim Beenden der App nicht hängen bleiben.
+  await Promise.race([
+    w.close(),
+    new Promise((_, rej) => setTimeout(() => rej(new Error("close() hängt nach einem Schreibfehler")), 2000)),
+  ]);
 });

@@ -296,7 +296,7 @@ test("Zeitpläne: anlegen, abschalten, löschen, ungültige Cron-Ausdrücke able
 });
 
 test("Dashboard: Token + Nonce eingesetzt, strenge CSP, Clickjacking-Schutz", async () => {
-  const r = await request(port, { path: "/" });
+  const r = await request(port, { path: `/?token=${TOKEN}` });
 
   assert.equal(r.status, 200);
   assert.ok(r.body.includes(TOKEN), "Token im HTML");
@@ -313,6 +313,19 @@ test("Dashboard: Token + Nonce eingesetzt, strenge CSP, Clickjacking-Schutz", as
   assert.equal(/\son[a-z]+\s*=/.test(r.body), false, "keine Inline-Event-Handler (CSP)");
 });
 
+test("Dashboard: ohne oder mit falschem Token wird weder die Seite noch das Token ausgeliefert", async () => {
+  for (const p of ["/", "/?token=falsch", "/?token="]) {
+    const r = await request(port, { path: p });
+
+    assert.equal(r.status, 401, p);
+    assert.ok(!r.body.includes(TOKEN), "Token darf nicht in der Antwort stehen");
+    assert.ok(!r.body.includes("<html"), "keine Dashboard-Seite");
+  }
+
+  // Header statt Query ist ebenfalls gültig (z. B. für Skripte)
+  assert.equal((await request(port, { path: "/", headers: auth })).status, 200);
+});
+
 test("Exporte erfordern das Token; Summaries-CSV neutralisiert Formeln", async () => {
   assert.equal((await request(port, { path: "/export/summaries.csv" })).status, 401);
   assert.equal((await request(port, { path: "/export/samples.csv", headers: auth })).status, 404);
@@ -321,6 +334,15 @@ test("Exporte erfordern das Token; Summaries-CSV neutralisiert Formeln", async (
 
   assert.equal(ok.status, 200);
   assert.match(ok.headers["content-type"] ?? "", /text\/csv/);
+
+  // Eine Zusammenfassung, deren ID wie eine Formel aussieht, muss neutralisiert werden.
+  mgr.emit("interaction", "=cmd|' /C calc'!A0", { loop: 1, at: 1, startedAtSec: 1, action: "next", status: "skipped", recoveryMs: -1 });
+  mgr.emit("stopped", "=cmd|' /C calc'!A0", "completed");
+
+  const csv = (await request(port, { path: "/export/summaries.csv", headers: auth })).body;
+
+  assert.ok(!/^=/m.test(csv), "keine Zeile darf mit = beginnen");
+  assert.match(csv, /^'=cmd/m, "Formel wird mit ' neutralisiert");
 });
 
 test("WebSocket: nur mit Token, gültigem Origin; Samples werden gesendet", async () => {

@@ -51,6 +51,12 @@ test("ungültige URLs werden abgelehnt und nicht gespeichert", () => {
   }
 
   assert.throws(() => r.add(v("x".repeat(LIMITS.maxUrlLength))), ValidationError, "zu lang");
+
+  // erlaubter Host, aber keine startbare URL (Startseite, Suche, Kanalloses)
+  for (const unusable of ["https://www.youtube.com/", "https://www.youtube.com/results?search_query=x", "https://youtu.be"]) {
+    assert.throws(() => r.add(unusable), ValidationError, unusable);
+  }
+
   assert.deepEqual(r.all(), []);
 });
 
@@ -73,7 +79,7 @@ test("kaputte oder manipulierte Datei: gültige Einträge bleiben, Rest wird ver
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(
     file,
-    JSON.stringify([v("ok"), v("ok"), "file:///etc/passwd", 7, null, " " + v("ok2") + " "])
+    JSON.stringify([v("ok"), v("ok"), "file:///etc/passwd", "https://www.youtube.com/", 7, null, " " + v("ok2") + " "])
   );
 
   assert.deepEqual(new RecentUrls(file).all(), [v("ok"), v("ok2")]);

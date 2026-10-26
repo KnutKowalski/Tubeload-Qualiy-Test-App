@@ -6,6 +6,7 @@ import path from "node:path";
 
 import { LIMITS } from "../src/limits";
 import { SETTING_BOUNDS, SettingsStore, defaultSettings, sessionDefaultsFrom } from "../src/settings";
+import { StorageError } from "../src/errors";
 import { ValidationError, parseSessionInput } from "../src/validate";
 
 const tmpFile = () => path.join(fs.mkdtempSync(path.join(os.tmpdir(), "tb-set-")), "settings.json");
@@ -116,4 +117,22 @@ test("Einstellungen wirken als Standardwerte neuer Sessions, die Obergrenzen ble
   assert.equal(parseSessionInput({ url, maxLoops: 2, maxRuntimeSec: 60 }, d).maxLoops, 2);
   assert.throws(() => parseSessionInput({ url, maxLoops: LIMITS.maxLoops + 1 }, d), ValidationError);
   assert.throws(() => parseSessionInput({ url, maxRuntimeSec: LIMITS.maxRuntimeSec + 1 }, d), ValidationError);
+});
+
+test("Schreibfehler: update/reset melden den Fehler und übernehmen nichts (kein vorgetäuschter Erfolg)", () => {
+  // Der Datenordner ist eine Datei: Anlegen der Settings-Datei scheitert.
+  const blocker = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "tb-set-")), "blocker");
+
+  fs.writeFileSync(blocker, "x");
+
+  const s = new SettingsStore(path.join(blocker, "settings.json"), defaultSettings({}));
+  const before = s.get();
+  let changes = 0;
+
+  s.on("change", () => changes++);
+
+  assert.throws(() => s.update({ maxSessions: 7 }), StorageError);
+  assert.deepEqual(s.get(), before, "Wert darf sich nicht geändert haben");
+  assert.throws(() => s.reset(), StorageError);
+  assert.equal(changes, 0, "kein change-Ereignis bei Fehler");
 });

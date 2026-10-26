@@ -111,12 +111,14 @@ function startCore() {
       ELECTRON_RUN_AS_NODE: "1",
       TB_DATA_DIR: dataDir,
       TB_DASHBOARD: path.join(dir, "public", "dashboard.html"),
-      // Das Token wird in das ausgelieferte Dashboard eingesetzt; es verlässt die App nie.
+      // Das Dashboard wird nur mit diesem Token ausgeliefert (siehe loadURL mit ?token=…)
+      // und das Token wird an die Seite weitergegeben; es verlässt den Rechner nie.
       TB_TOKEN: token,
       PORT: String(port),
       TB_HEADLESS: process.env.TB_HEADLESS || "1",
     },
-    stdio: ["ignore", "pipe", "pipe"],
+    // Vierter Eintrag: IPC-Kanal für das geordnete Beenden (siehe stopCore).
+    stdio: ["ignore", "pipe", "pipe", "ipc"],
     windowsHide: true,
   });
 
@@ -150,12 +152,34 @@ function startCore() {
 function stopCore() {
   stoppingCore = true;
 
+  const child = coreProcess;
+
+  if (!child) return;
+
   try {
-    // SIGTERM löst im Core einen geordneten Shutdown aus (unter Windows hartes Beenden).
-    coreProcess?.kill("SIGTERM");
+    // Geordneter Shutdown über den IPC-Kanal: funktioniert auch unter Windows, wo
+    // kill("SIGTERM") den Prozess hart beendet und Zusammenfassungen verloren gehen.
+    if (child.connected) child.send("shutdown");
+    else child.kill("SIGTERM");
   } catch {
-    // Prozess bereits beendet
+    try {
+      child.kill("SIGTERM");
+    } catch {
+      // Prozess bereits beendet
+    }
   }
+
+  // Reagiert der Core nicht (er beendet sich selbst nach höchstens 20 s), wird er hart beendet.
+  const hardKill = setTimeout(() => {
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      // bereits beendet
+    }
+  }, 25_000);
+
+  hardKill.unref?.();
+  child.once("exit", () => clearTimeout(hardKill));
 }
 
 // Stürzt der Core ab, wird er neu gestartet. Das Dashboard verbindet sich von selbst
@@ -241,7 +265,8 @@ function createWindow() {
 
   wc.session.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
 
-  win.loadURL(origin + "/");
+  // Das Dashboard wird nur mit Token ausgeliefert.
+  win.loadURL(`${origin}/?token=${token}`);
 
   win.on("closed", () => {
     win = null;

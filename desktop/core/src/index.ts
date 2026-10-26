@@ -103,6 +103,7 @@ async function main() {
   // HTTP-Server ZUERST: /api/health antwortet sofort, unabhängig davon,
   // ob/wann der Browser startet.
   let running: RunningServer;
+  let boundPort = port;
 
   try {
     running = startServer({
@@ -116,7 +117,7 @@ async function main() {
       settings,
       recent,
     });
-    await running.listening;
+    boundPort = await running.listening;
   } catch (e) {
     log.error(`HTTP-Server konnte nicht starten (Port ${port})`, e);
     process.exit(1);
@@ -125,7 +126,13 @@ async function main() {
   // Der Scheduler startet Läufe erst, wenn der Browser bereit ist (manager.isReady()).
   scheduler.start();
 
-  log.info(`TubeLoad QA Core ready on http://127.0.0.1:${port}`);
+  log.info(`TubeLoad QA Core ready on http://127.0.0.1:${boundPort}`);
+
+  // Das Dashboard wird nur mit Token ausgeliefert. Für die Entwicklung im Terminal wird die
+  // vollständige Adresse ausgegeben – bewusst nicht in Logdateien (nur bei interaktivem Terminal).
+  if (process.stdout.isTTY) {
+    console.log(`Dashboard öffnen: http://127.0.0.1:${boundPort}/?token=${running.token}`);
+  }
 
   // Browser im Hintergrund starten und bei Verlust neu starten.
   void (async () => {
@@ -183,6 +190,14 @@ async function main() {
 
   process.on("SIGINT", () => void shutdown(0));
   process.on("SIGTERM", () => void shutdown(0));
+
+  // Von der Electron-App gestartet (IPC-Kanal): geordnet beenden, auch unter Windows, wo
+  // kill("SIGTERM") den Prozess hart beendet und die Zusammenfassungen laufender Sessions
+  // verloren gehen. Ist der Elternprozess weg, beendet sich der Core ebenfalls.
+  process.on("message", (m) => {
+    if (m === "shutdown") void shutdown(0);
+  });
+  process.on("disconnect", () => void shutdown(0));
 
   // Ein einzelner unbehandelter Promise-Fehler darf nicht alle Sessions beenden.
   process.on("unhandledRejection", (reason) => {
