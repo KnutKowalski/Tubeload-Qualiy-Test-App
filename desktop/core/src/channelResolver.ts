@@ -1,17 +1,16 @@
 import type { Page } from "playwright-core";
 import { acceptConsent } from "./consent";
+import { LIMITS } from "./limits";
 import type { ConsentMode } from "./types";
+import { channelVideosUrl } from "./url";
 
 export async function resolveChannelVideos(
   page: Page,
   channelUrl: string,
-  maxVideos = 25,
+  maxVideos: number = LIMITS.maxChannelVideos,
   consentMode: ConsentMode = "reject"
 ): Promise<string[]> {
-  const base = channelUrl.replace(/\/$/, "");
-  const videosUrl = base.endsWith("/videos") ? base : `${base}/videos`;
-
-  await page.goto(videosUrl, {
+  await page.goto(channelVideosUrl(channelUrl), {
     waitUntil: "domcontentloaded",
     timeout: 60000,
   });
@@ -51,6 +50,7 @@ export async function resolveChannelVideos(
 
         while ((m = rx.exec(json)) && out.length < max) {
           const v = m[1];
+
           if (!seen.has(v)) {
             seen.add(v);
             out.push(v);

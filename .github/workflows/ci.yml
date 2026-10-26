@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core:
+    name: Core (Typecheck + Tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/core/package-lock.json
+
+      - name: Install
+        working-directory: desktop/core
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: desktop/core
+        run: npm run typecheck
+
+      # Ohne Browser würden die E2E-Tests sonst stillschweigend übersprungen.
+      # TB_REQUIRE_BROWSER lässt sie dann fehlschlagen statt zu überspringen.
+      - name: Browser für E2E-Tests bereitstellen
+        working-directory: desktop/core
+        run: npx playwright-core install chromium
+
+      - name: Test
+        working-directory: desktop/core
+        env:
+          TB_REQUIRE_BROWSER: "1"
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee test-output.txt || { echo "::error title=Tests fehlgeschlagen::$(grep -E '^not ok' test-output.txt | head -5 | tr '\n' ' ')"; exit 1; }
+
+      - name: Build
+        working-directory: desktop/core
+        run: npm run build

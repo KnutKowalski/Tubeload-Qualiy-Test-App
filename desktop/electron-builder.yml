@@ -2,6 +2,15 @@ appId: dev.tubeload.qa
 productName: TubeLoad QA
 copyright: Copyright © 2026 TubeLoad QA
 
+# Eindeutige Dateinamen pro Plattform/Architektur (sonst überschreiben sich z. B.
+# das Windows-Setup und die portable Version, die beide auf .exe enden).
+artifactName: TubeLoad-QA-${version}-${os}-${arch}.${ext}
+
+# Es wird nichts veröffentlicht und die App hat keinen Auto-Updater: ohne diese
+# Zeile versucht electron-builder, Update-Metadaten zu erzeugen, und bricht ab,
+# wenn es das Repository nicht erkennt.
+publish: null
+
 directories:
   output: release
   buildResources: build
@@ -16,14 +25,23 @@ extraResources:
     filter:
       - dist/**/*
       - public/**/*
-      - node_modules/**/*
       - package.json
+  # electron-builder schließt "node_modules" in Filtern grundsätzlich aus (auch wenn
+  # der Filter es nennt). Die Laufzeit-Abhängigkeiten des Cores (playwright-core, ws,
+  # ...) kommen deshalb als eigener Eintrag mit. Ohne sie startet der Core nicht.
+  # (Vorher npm prune --omit=dev im core-Ordner, siehe Workflow.)
+  - from: core/node_modules
+    to: core/node_modules
 
 mac:
   category: public.app-category.developer-tools
   target:
     - dmg
     - zip
+  # Ohne Apple-Developer-Zertifikat wird ad-hoc signiert ("-"). Ganz ohne Signatur
+  # startet eine App auf Apple Silicon nicht. Beim ersten Start trotzdem:
+  # Rechtsklick -> Öffnen. Mit eigenem Zertifikat (CSC_LINK) diese Zeile entfernen.
+  identity: "-"
   hardenedRuntime: false
   gatekeeperAssess: false
 
@@ -32,3 +50,16 @@ linux:
     - AppImage
     - deb
   category: Development
+
+win:
+  target:
+    - nsis
+    - portable
+
+nsis:
+  artifactName: TubeLoad-QA-${version}-${os}-${arch}-setup.${ext}
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+
+portable:
+  artifactName: TubeLoad-QA-${version}-${os}-${arch}-portable.${ext}

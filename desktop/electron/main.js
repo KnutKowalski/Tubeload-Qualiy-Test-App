@@ -1,45 +1,86 @@
 const { app, BrowserWindow, dialog } = require("electron");
-const { spawn } = require("child_process");
-const fs = require("fs");
-const path = require("path");
-const net = require("net");
+const { spawn } = require("node:child_process");
+const crypto = require("node:crypto");
+const fs = require("node:fs");
+const net = require("node:net");
+const path = require("node:path");
+
+const MAX_LOG_BYTES = 20 * 1024 * 1024;
+const MAX_RESTARTS = 5;
+const RESTART_WINDOW_MS = 2 * 60 * 1000;
 
 let win = null;
 let coreProcess = null;
 let coreLogTail = "";
 let logPath = null;
+let logBytes = 0;
+
+let port = 0;
+let token = "";
+let origin = "";
+
+let quitting = false;
+// true, solange der Core absichtlich beendet wird (Fenster zu, App beenden).
+let stoppingCore = false;
+let booting = false;
+const restartTimes = [];
+
+// ---------------------------------------------------------------------------
+// Einzelinstanz: eine zweite Instanz würde einen zweiten Core + Browser starten.
+// ---------------------------------------------------------------------------
+
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    if (!win) return;
+    if (win.isMinimized()) win.restore();
+    win.focus();
+  });
+
+  app.whenReady().then(boot);
+}
+
+// ---------------------------------------------------------------------------
+// Hilfsfunktionen
+// ---------------------------------------------------------------------------
 
 function getFreePort() {
   return new Promise((resolve, reject) => {
     const srv = net.createServer();
+    srv.on("error", reject);
     srv.listen(0, "127.0.0.1", () => {
       const address = srv.address();
-      const port = typeof address === "string" ? 0 : address.port;
-      srv.close(() => resolve(port));
+      const p = typeof address === "string" || !address ? 0 : address.port;
+      srv.close(() => resolve(p));
     });
-    srv.on("error", reject);
   });
 }
 
 function appendCoreLog(chunk) {
-  coreLogTail = (coreLogTail + chunk).slice(-8000);
+  const text = String(chunk);
+
+  coreLogTail = (coreLogTail + text).slice(-8000);
+
+  if (!logPath || logBytes > MAX_LOG_BYTES) return;
 
   try {
-    fs.appendFileSync(logPath, chunk);
-  } catch {}
+    fs.appendFileSync(logPath, text);
+    logBytes += Buffer.byteLength(text);
+  } catch {
+    // Logdatei nicht schreibbar – kein Grund, die App zu beenden.
+  }
 }
 
-async function waitForHealth(port, child) {
-  const url = `http://127.0.0.1:${port}/api/health`;
+async function waitForHealth(child) {
+  const url = `${origin}/api/health`;
 
-  // 240 x 500 ms = 120 s Startfenster (vorher 60 s).
+  // 240 x 500 ms = 120 s Startfenster.
   for (let i = 0; i < 240; i++) {
-    if (child.killed || child.exitCode !== null) {
-      return false;
-    }
+    if (child.exitCode !== null || child.signalCode !== null) return false;
 
     try {
-      const res = await fetch(url);
+      const res = await fetch(url, { signal: AbortSignal.timeout(2000) });
       if (res.ok) return true;
     } catch {
       // noch nicht bereit
@@ -51,76 +92,149 @@ async function waitForHealth(port, child) {
   return false;
 }
 
-async function createWindow() {
-  const gotLock = app.requestSingleInstanceLock();
-  if (!gotLock) {
-    app.quit();
-    return;
-  }
-
-  const port = await getFreePort();
-  const dataDir = path.join(app.getPath("userData"), "data");
-  logPath = path.join(app.getPath("userData"), "core.log");
-
-  try {
-    fs.writeFileSync(logPath, "");
-  } catch {}
-
-  const coreDir = app.isPackaged
+function coreDir() {
+  return app.isPackaged
     ? path.join(process.resourcesPath, "core")
     : path.join(__dirname, "..", "core");
+}
 
-  const entry = path.join(coreDir, "dist", "index.js");
-  const dashboard = path.join(coreDir, "public", "dashboard.html");
+function startCore() {
+  const dir = coreDir();
+  const dataDir = path.join(app.getPath("userData"), "data");
 
-  coreProcess = spawn(process.execPath, [entry], {
-    cwd: coreDir,
+  stoppingCore = false;
+
+  const child = spawn(process.execPath, [path.join(dir, "dist", "index.js")], {
+    cwd: dir,
     env: {
       ...process.env,
       ELECTRON_RUN_AS_NODE: "1",
       TB_DATA_DIR: dataDir,
-      TB_DASHBOARD: dashboard,
+      TB_DASHBOARD: path.join(dir, "public", "dashboard.html"),
+      // Das Dashboard wird nur mit diesem Token ausgeliefert (siehe loadURL mit ?token=…)
+      // und das Token wird an die Seite weitergegeben; es verlässt den Rechner nie.
+      TB_TOKEN: token,
       PORT: String(port),
       TB_HEADLESS: process.env.TB_HEADLESS || "1",
     },
-    stdio: ["ignore", "pipe", "pipe"],
+    // Vierter Eintrag: IPC-Kanal für das geordnete Beenden (siehe stopCore).
+    stdio: ["ignore", "pipe", "pipe", "ipc"],
+    windowsHide: true,
   });
 
-  coreProcess.stdout.on("data", (data) => {
+  coreProcess = child;
+
+  child.stdout.on("data", (data) => {
     process.stdout.write(`[core] ${data}`);
     appendCoreLog(data);
   });
 
-  coreProcess.stderr.on("data", (data) => {
+  child.stderr.on("data", (data) => {
     process.stderr.write(`[core] ${data}`);
     appendCoreLog(data);
   });
 
-  coreProcess.on("exit", (code) => {
-    console.log(`Core exited with code ${code}`);
-    appendCoreLog(`\n[Core-Prozess beendet mit Code ${code}]\n`);
+  child.on("error", (err) => {
+    appendCoreLog(`\n[Core konnte nicht gestartet werden: ${err.message}]\n`);
   });
 
-  const ready = await waitForHealth(port, coreProcess);
+  child.on("exit", (code, signal) => {
+    appendCoreLog(`\n[Core-Prozess beendet: Code ${code}, Signal ${signal}]\n`);
 
-  if (!ready) {
-    dialog.showErrorBox(
-      "TubeLoad QA Startfehler",
-      "Der TubeLoad-Core konnte nicht starten.\n\n" +
-        "Letzte Core-Ausgabe:\n" +
-        "---------------------------\n" +
-        (coreLogTail.trim() || "(keine Ausgabe – Core evtl. vor dem Start abgestürzt)") +
-        "\n---------------------------\n\n" +
-        "Vollständiges Log: " + logPath + "\n\n" +
-        "Prüfe:\n" +
-        "- Ist Google Chrome oder Chromium installiert? (google-chrome --version)\n" +
-        "- Läuft noch eine alte App-Instanz im Hintergrund? Beenden und neu starten\n" +
-        "- Optional TB_CHROME_PATH auf den Chrome-Pfad setzen"
+    if (coreProcess === child) coreProcess = null;
+
+    if (!quitting && !stoppingCore) scheduleRestart();
+  });
+
+  return child;
+}
+
+function stopCore() {
+  stoppingCore = true;
+
+  const child = coreProcess;
+
+  if (!child) return;
+
+  try {
+    // Geordneter Shutdown über den IPC-Kanal: funktioniert auch unter Windows, wo
+    // kill("SIGTERM") den Prozess hart beendet und Zusammenfassungen verloren gehen.
+    if (child.connected) child.send("shutdown");
+    else child.kill("SIGTERM");
+  } catch {
+    try {
+      child.kill("SIGTERM");
+    } catch {
+      // Prozess bereits beendet
+    }
+  }
+
+  // Reagiert der Core nicht (er beendet sich selbst nach höchstens 20 s), wird er hart beendet.
+  const hardKill = setTimeout(() => {
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      // bereits beendet
+    }
+  }, 25_000);
+
+  hardKill.unref?.();
+  child.once("exit", () => clearTimeout(hardKill));
+}
+
+// Stürzt der Core ab, wird er neu gestartet. Das Dashboard verbindet sich von selbst
+// wieder (gleicher Port, gleiches Token). Bei Absturzschleifen wird aufgegeben.
+function scheduleRestart() {
+  const now = Date.now();
+
+  while (restartTimes.length && now - restartTimes[0] > RESTART_WINDOW_MS) {
+    restartTimes.shift();
+  }
+
+  if (restartTimes.length >= MAX_RESTARTS) {
+    showStartError(
+      `Der TubeLoad-Core ist ${MAX_RESTARTS}× kurz hintereinander abgestürzt.`
     );
-    app.quit();
+    quitApp();
     return;
   }
 
+  restartTimes.push(now);
+
+  setTimeout(() => {
+    if (quitting || stoppingCore || coreProcess) return;
+    startCore();
+  }, 1500);
+}
+
+function showStartError(headline) {
+  dialog.showErrorBox(
+    "TubeLoad QA Startfehler",
+    headline +
+      "\n\n" +
+      "Letzte Core-Ausgabe:\n" +
+      "---------------------------\n" +
+      (coreLogTail.trim() || "(keine Ausgabe – Core evtl. vor dem Start abgestürzt)") +
+      "\n---------------------------\n\n" +
+      "Vollständiges Log: " + logPath + "\n\n" +
+      "Prüfe:\n" +
+      "- Ist Google Chrome, Chromium oder Microsoft Edge installiert?\n" +
+      "- Läuft noch eine alte App-Instanz im Hintergrund? Beenden und neu starten\n" +
+      "- Optional TB_CHROME_PATH auf den Browser-Pfad setzen"
+  );
+}
+
+function quitApp() {
+  quitting = true;
+  stopCore();
+  app.quit();
+}
+
+// ---------------------------------------------------------------------------
+// Fenster
+// ---------------------------------------------------------------------------
+
+function createWindow() {
   win = new BrowserWindow({
     width: 1320,
     height: 900,
@@ -130,39 +244,87 @@ async function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
+      spellcheck: false,
     },
   });
 
   win.removeMenu?.();
-  win.loadURL(`http://127.0.0.1:${port}`);
+
+  const wc = win.webContents;
+
+  // Das Fenster zeigt ausschließlich das lokale Dashboard.
+  wc.setWindowOpenHandler(() => ({ action: "deny" }));
+
+  wc.on("will-navigate", (event, url) => {
+    if (url !== origin && !url.startsWith(origin + "/")) event.preventDefault();
+  });
+
+  wc.on("will-attach-webview", (event) => event.preventDefault());
+
+  wc.session.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
+
+  // Das Dashboard wird nur mit Token ausgeliefert.
+  win.loadURL(`${origin}/?token=${token}`);
 
   win.on("closed", () => {
     win = null;
   });
 }
 
-app.whenReady().then(createWindow);
+async function boot() {
+  if (booting) return;
+  booting = true;
+
+  try {
+    port = await getFreePort();
+    token = crypto.randomBytes(24).toString("hex");
+    origin = `http://127.0.0.1:${port}`;
+
+    logPath = path.join(app.getPath("userData"), "core.log");
+    logBytes = 0;
+
+    try {
+      fs.mkdirSync(path.dirname(logPath), { recursive: true });
+      fs.writeFileSync(logPath, "");
+    } catch {
+      // ohne Logdatei weiterarbeiten
+    }
+
+    const child = startCore();
+
+    if (!(await waitForHealth(child))) {
+      stopCore();
+      showStartError("Der TubeLoad-Core konnte nicht starten.");
+      quitApp();
+      return;
+    }
+
+    createWindow();
+  } finally {
+    booting = false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// App-Lebenszyklus
+// ---------------------------------------------------------------------------
 
 app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
-    createWindow();
+  // macOS: Dock-Klick nach geschlossenem Fenster -> Core und Fenster neu aufbauen.
+  if (BrowserWindow.getAllWindows().length === 0 && !booting) {
+    boot();
   }
 });
 
 app.on("before-quit", () => {
-  try {
-    coreProcess?.kill("SIGINT");
-  } catch {
-    // ignore
-  }
+  quitting = true;
+  stopCore();
 });
 
 app.on("window-all-closed", () => {
-  try {
-    coreProcess?.kill("SIGINT");
-  } catch {
-    // ignore
-  }
+  stopCore();
 
   if (process.platform !== "darwin") {
     app.quit();

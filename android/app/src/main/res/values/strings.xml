@@ -1,3 +1,11 @@
 <resources>
     <string name="app_name">TubeLoad QA</string>
+    <string name="url_hint">YouTube Video- oder Playlist-URL (gespeicherte URLs: antippen)</string>
+    <string name="minutes_hint">Min. (30)</string>
+    <string name="loops_hint">Läufe (3)</string>
+    <string name="repeat_label">Wiederholen</string>
+    <string name="quality_hint">Qualität: im Player über das Zahnrad-Symbol wählbar (Auto, 144p bis 1080p/4K – je nach Video und Gerät).</string>
+    <string name="start_label">Start</string>
+    <string name="stop_label">Stop</string>
+    <string name="status_ready">Bereit</string>
 </resources>

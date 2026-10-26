@@ -3,47 +3,62 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="tb-token" content="{{TOKEN}}" />
   <title>TubeLoad QA</title>
-  <style>
+  <style nonce="{{NONCE}}">
     :root {
       color-scheme: dark;
+      --bg: #111;
+      --panel: #181818;
+      --field: #1d1d1d;
+      --line: #333;
+      --text: #eee;
+      --muted: #9a9a9a;
+      --accent: #4af;
+      --danger: #f88;
+      --ok: #7d7;
     }
+
+    * { box-sizing: border-box; }
 
     body {
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
       margin: 16px;
-      background: #111;
-      color: #eee;
+      background: var(--bg);
+      color: var(--text);
     }
 
-    h1, h2, h3 {
-      margin: 10px 0;
-    }
+    h1, h2 { margin: 10px 0; }
+    h1 { font-size: 24px; }
+    h2 { font-size: 18px; margin-top: 24px; }
 
-    input, select, button, textarea {
+    input, select, button {
       padding: 7px 9px;
       margin: 3px;
-      background: #1d1d1d;
-      color: #eee;
-      border: 1px solid #333;
+      background: var(--field);
+      color: var(--text);
+      border: 1px solid var(--line);
       border-radius: 6px;
       font: inherit;
     }
 
-    button {
-      cursor: pointer;
+    input:focus-visible, select:focus-visible, button:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 1px;
     }
 
-    button:hover {
-      background: #282828;
-    }
+    button { cursor: pointer; }
+    button:hover { background: #282828; }
+    button.primary { border-color: var(--accent); }
 
-    .row {
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-      align-items: center;
-    }
+    label { display: inline-flex; align-items: center; gap: 4px; }
+    label input { margin: 0; }
+
+    .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+
+    .url { flex: 1 1 420px; min-width: 240px; }
+    .num { width: 110px; }
+    .cron { width: 170px; }
 
     .grid {
       display: grid;
@@ -53,24 +68,26 @@
     }
 
     .card {
-      background: #181818;
-      border: 1px solid #333;
+      background: var(--panel);
+      border: 1px solid var(--line);
       padding: 10px 12px;
       border-radius: 10px;
     }
 
-    .card b {
-      font-size: 20px;
-    }
+    .card b { font-size: 20px; display: block; margin-top: 2px; }
+    .card small { color: var(--muted); }
 
     canvas {
+      display: block;
       background: #151515;
-      border: 1px solid #333;
+      border: 1px solid var(--line);
       width: 100%;
       height: 180px;
       border-radius: 10px;
       margin: 10px 0;
     }
+
+    .scroll { overflow-x: auto; }
 
     table {
       width: 100%;
@@ -86,55 +103,79 @@
       vertical-align: top;
     }
 
-    th {
-      color: #aaa;
-      font-weight: 600;
-    }
+    th { color: #aaa; font-weight: 600; white-space: nowrap; }
+    td.num-cell { font-variant-numeric: tabular-nums; white-space: nowrap; }
+    td.url-cell { word-break: break-all; max-width: 360px; }
 
-    .muted {
-      color: #888;
-    }
+    .muted { color: var(--muted); }
+    .danger { color: var(--danger); }
+    .ok { color: var(--ok); }
 
-    #msg {
-      min-height: 1.2em;
-      color: #8ff;
-      margin: 6px 0;
-    }
+    .empty { color: var(--muted); padding: 10px 8px; }
 
-    .danger {
-      color: #f88;
+    #msg { min-height: 1.4em; margin: 8px 0; color: #8ff; }
+    #msg.danger { color: var(--danger); }
+
+    #conn { font-size: 12px; color: var(--muted); }
+    #conn.bad { color: var(--danger); }
+
+    .note { color: var(--muted); font-size: 13px; max-width: 900px; }
+
+    .setting { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; margin: 3px 8px 3px 0; }
+    .setting span { font-size: 12px; color: var(--muted); }
+    .setting input { margin: 0; }
+    .row-end { align-self: flex-end; }
+
+    .ia { flex: 1 1 100%; margin: 4px 3px; }
+    .ia summary { cursor: pointer; color: var(--muted); }
+    .ia summary:hover { color: var(--text); }
+    textarea.script {
+      display: block;
+      width: 100%;
+      max-width: 640px;
+      min-height: 120px;
+      margin: 6px 3px;
+      padding: 7px 9px;
+      background: var(--field);
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      font: 13px ui-monospace, Menlo, Consolas, monospace;
     }
+    textarea.script:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+    code { background: #222; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
   </style>
 </head>
 <body>
   <h1>TubeLoad QA</h1>
-  <div class="muted">
-    Netzwerk-/Streaming-Qualitätstest mit Playwright-Chromium. Nur für legitime QA-Zwecke verwenden.
-  </div>
+  <p class="note">
+    Misst die Wiedergabequalität der eigenen Netzwerkverbindung (Bandbreite, Puffer,
+    Stalls, Auflösung, CPU/RAM). Sessions sind in Dauer, Wiederholungen und Anzahl begrenzt.
+    Die Nutzungsbedingungen von YouTube gelten weiterhin; die App ist nicht dafür gedacht,
+    Aufrufzahlen oder andere Kennzahlen zu beeinflussen.
+  </p>
+  <div id="conn" role="status">Verbinde…</div>
 
   <h2>Session starten</h2>
 
   <form id="sessionForm" class="row">
-    <input
-      name="url"
-      placeholder="YouTube Video-, Playlist- oder Kanal-URL"
-      size="78"
-      required
-    />
+    <input class="url" name="url" list="recentList" autocomplete="off" aria-label="YouTube-URL" placeholder="YouTube Video-, Playlist- oder Kanal-URL" required maxlength="2048" />
 
-    <select id="recentUrls" title="Zuletzt verwendete URLs">
-      <option value="">Letzte URLs…</option>
+    <select id="recentUrls" aria-label="Gespeicherte URLs" title="Gespeicherte URLs (bleiben nach dem Schließen der App erhalten)">
+      <option value="">Gespeicherte URLs…</option>
     </select>
+    <button type="button" id="removeRecent" title="Die oben gewählte gespeicherte URL aus der Liste entfernen">URL entfernen</button>
+    <datalist id="recentList"></datalist>
 
-    <select name="kind">
-      <option value="auto">auto erkennen</option>
+    <select name="kind" aria-label="Typ">
+      <option value="auto">Typ: automatisch</option>
       <option value="video">Video</option>
       <option value="playlist">Playlist</option>
       <option value="channel">Kanal</option>
     </select>
 
-    <select name="quality">
-      <option value="auto">auto</option>
+    <select name="quality" aria-label="Auflösung">
+      <option value="auto">Auflösung: auto</option>
       <option value="144p">144p</option>
       <option value="240p">240p</option>
       <option value="360p">360p</option>
@@ -145,85 +186,117 @@
       <option value="2160p">2160p</option>
     </select>
 
-    <input name="minutes" type="number" min="1" placeholder="Minuten" style="width:110px" />
+    <input class="num" name="minutes" type="number" min="1" max="240" step="1" aria-label="Maximale Laufzeit in Minuten" placeholder="Min. (30)" data-ph="minutes" />
 
-    <label><input type="checkbox" name="humanize" checked /> Human</label>
-    <label><input type="checkbox" name="repeat" checked /> Repeat</label>
+    <label><input type="checkbox" name="repeat" /> Wiederholen</label>
+    <input class="num" name="loops" type="number" min="1" max="10" step="1" aria-label="Durchläufe (höchstens 10)" placeholder="Läufe (3)" data-ph="loops" />
 
-    <button>Start</button>
-    <button type="button" onclick="location.href='/export/samples.csv'">Samples CSV</button>
-    <button type="button" onclick="location.href='/export/summaries.csv'">Summaries CSV</button>
+    <button class="primary" type="submit">Start</button>
+    <button type="button" id="exportSamples">Samples CSV</button>
+    <button type="button" id="exportSummaries">Summaries CSV</button>
+    <button type="button" id="exportInteractions" title="Eine Zeile je Skriptschritt mit der gemessenen Erholzeit">Interaktionen CSV</button>
+
+    <details class="ia">
+      <summary>Interaktionsskript (optional): Pause, Vor- und Zurückspulen, Videowechsel</summary>
+      <div class="row">
+        <select class="preset" aria-label="Vorlage für das Skript"></select>
+        <button type="button" class="clearScript">Leeren</button>
+      </div>
+      <textarea class="script" name="interactions" rows="6" spellcheck="false" maxlength="10000" aria-label="Interaktionsskript"
+        placeholder="30 pause 5&#10;1:00 seek +30&#10;1:30 seek -15&#10;2:00 next&#10;2:30 previous"></textarea>
+      <p class="note">
+        Eine Zeile pro Schritt: <code>Zeit Aktion [Wert]</code>. Die Zeit zählt in Sekunden oder als <code>m:ss</code> ab
+        Beginn des Durchlaufs. Aktionen: <code>pause [Sekunden]</code>, <code>seek +30</code> / <code>seek -15</code>
+        (vor- bzw. zurückspulen), <code>next</code> / <code>previous</code> (nächstes bzw. vorheriges Video, nur bei
+        Playlist oder Kanal). <code>#</code> beginnt einen Kommentar.
+        Der Ablauf ist fest und bei jedem Durchlauf identisch (kein Zufall), damit sich Messungen vergleichen lassen.
+        Pro Schritt wird gemessen, wie lange die Wiedergabe danach bis zum erneuten Laufen braucht.
+        Zwischen zwei Schritten mindestens 2 s (Pausen zählen mit), höchstens 50 Schritte.
+      </p>
+    </details>
   </form>
 
-  <div id="msg"></div>
+  <div id="msg" role="status" aria-live="polite"></div>
 
   <div class="grid">
     <div class="card">
-      Gesamt-Bandbreite<br />
+      Gesamt-Bandbreite
       <b id="totalBw">0.00 MB/s</b>
     </div>
 
     <div class="card">
-      CPU Browser<br />
+      CPU Browser (alle Prozesse)
       <b id="cpu">0 %</b>
+      <small>100 % = ein Kern</small>
     </div>
 
     <div class="card">
-      RAM Browser<br />
+      RAM Browser (alle Prozesse)
       <b id="ram">0 MB</b>
     </div>
 
     <div class="card">
-      Aktive Sessions<br />
+      Aktive Sessions
       <b id="activeCount">0</b>
     </div>
   </div>
 
-  <canvas id="chart" width="1200" height="180"></canvas>
+  <canvas id="chart" aria-label="Gesamt-Bandbreite der letzten Minuten"></canvas>
 
   <h2>Aktive Sessions</h2>
-  <table>
-    <thead>
-      <tr>
-        <th>ID</th>
-        <th>Typ</th>
-        <th>State</th>
-        <th>Quality</th>
-        <th>MB/s</th>
-        <th>Buffer</th>
-        <th>Stalls</th>
-        <th>Notizen</th>
-        <th></th>
-      </tr>
-    </thead>
-    <tbody id="sessionsBody"></tbody>
-  </table>
+  <div class="scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Typ</th>
+          <th>Status</th>
+          <th>Auflösung</th>
+          <th>MB/s</th>
+          <th>Puffer</th>
+          <th>Stalls</th>
+          <th>Startzeit</th>
+          <th>Notizen</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="sessionsBody"></tbody>
+    </table>
+  </div>
 
   <h2>Session-Zusammenfassungen</h2>
-  <table>
-    <thead>
-      <tr>
-        <th>ID</th>
-        <th>Laufzeit</th>
-        <th>Ø MB/s</th>
-        <th>Peak MB/s</th>
-        <th>P95 MB/s</th>
-        <th>Stalls</th>
-        <th>Stall s</th>
-        <th>Quality</th>
-        <th>Drop %</th>
-      </tr>
-    </thead>
-    <tbody id="summariesBody"></tbody>
-  </table>
+  <div class="scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Laufzeit</th>
+          <th>Ø MB/s</th>
+          <th>Peak MB/s</th>
+          <th>P95 MB/s</th>
+          <th>Stalls</th>
+          <th>Stall s</th>
+          <th>Rebuffer</th>
+          <th>Startzeit</th>
+          <th>Auflösung</th>
+          <th>Drop %</th>
+          <th>Ende</th>
+          <th>Interaktionen</th>
+          <th>Notiz</th>
+        </tr>
+      </thead>
+      <tbody id="summariesBody"></tbody>
+    </table>
+  </div>
 
   <h2>Scheduler</h2>
 
   <form id="scheduleForm" class="row">
-    <input name="cron" placeholder="Cron, z. B. 0 2 * * *" required />
-    <input name="url" placeholder="URL" size="55" required />
-    <select name="quality">
-      <option value="auto">auto</option>
+    <input class="cron" name="cron" aria-label="Cron-Ausdruck" placeholder="Cron, z. B. 0 2 * * *" required maxlength="100" />
+    <input class="url" name="url" list="recentList" autocomplete="off" aria-label="YouTube-URL" placeholder="URL (gespeicherte URLs werden vorgeschlagen)" required maxlength="2048" />
+
+    <select name="quality" aria-label="Auflösung">
+      <option value="auto">Auflösung: auto</option>
       <option value="144p">144p</option>
       <option value="240p">240p</option>
       <option value="360p">360p</option>
@@ -233,31 +306,81 @@
       <option value="1440p">1440p</option>
       <option value="2160p">2160p</option>
     </select>
-    <input name="minutes" type="number" min="1" placeholder="Minuten" style="width:110px" />
-    <label><input type="checkbox" name="humanize" checked /> Human</label>
-    <label><input type="checkbox" name="repeat" checked /> Repeat</label>
-    <button>Plan hinzufügen</button>
+
+    <input class="num" name="minutes" type="number" min="1" max="240" step="1" aria-label="Maximale Laufzeit in Minuten" placeholder="Min. (30)" data-ph="minutes" />
+
+    <label><input type="checkbox" name="repeat" /> Wiederholen</label>
+    <input class="num" name="loops" type="number" min="1" max="10" step="1" aria-label="Durchläufe (höchstens 10)" placeholder="Läufe (3)" data-ph="loops" />
+
+    <button class="primary" type="submit">Plan hinzufügen</button>
+
+    <details class="ia">
+      <summary>Interaktionsskript (optional): Pause, Vor- und Zurückspulen, Videowechsel</summary>
+      <div class="row">
+        <select class="preset" aria-label="Vorlage für das Skript"></select>
+        <button type="button" class="clearScript">Leeren</button>
+      </div>
+      <textarea class="script" name="interactions" rows="6" spellcheck="false" maxlength="10000" aria-label="Interaktionsskript"
+        placeholder="30 pause 5&#10;1:00 seek +30&#10;1:30 seek -15&#10;2:00 next&#10;2:30 previous"></textarea>
+      <p class="note">
+        Eine Zeile pro Schritt: <code>Zeit Aktion [Wert]</code>. Die Zeit zählt in Sekunden oder als <code>m:ss</code> ab
+        Beginn des Durchlaufs. Aktionen: <code>pause [Sekunden]</code>, <code>seek +30</code> / <code>seek -15</code>
+        (vor- bzw. zurückspulen), <code>next</code> / <code>previous</code> (nächstes bzw. vorheriges Video, nur bei
+        Playlist oder Kanal). <code>#</code> beginnt einen Kommentar.
+        Der Ablauf ist fest und bei jedem Durchlauf identisch (kein Zufall), damit sich Messungen vergleichen lassen.
+        Pro Schritt wird gemessen, wie lange die Wiedergabe danach bis zum erneuten Laufen braucht.
+        Zwischen zwei Schritten mindestens 2 s (Pausen zählen mit), höchstens 50 Schritte.
+      </p>
+    </details>
   </form>
+  <p class="note">Läufe müssen mindestens <span id="minGapText">5</span> Minute(n) auseinanderliegen (einstellbar unter „Einstellungen“). Ein Lauf wird übersprungen, wenn der vorherige noch aktiv ist.</p>
 
-  <table>
-    <thead>
-      <tr>
-        <th>Cron</th>
-        <th>URL</th>
-        <th>Nächster Lauf</th>
-        <th>Letzter Lauf</th>
-        <th></th>
-      </tr>
-    </thead>
-    <tbody id="schedulesBody"></tbody>
-  </table>
+  <div class="scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>Cron</th>
+          <th>URL</th>
+          <th>Status</th>
+          <th>Nächster Lauf</th>
+          <th>Letzter Lauf</th>
+          <th>Hinweis</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="schedulesBody"></tbody>
+    </table>
+  </div>
 
-  <script>
-    const API = "";
-    let ws = null;
+  <h2>Einstellungen</h2>
 
-    const latest = new Map();
-    const sessions = new Map();
+  <form id="settingsForm" class="row">
+    <label class="setting"><span>Parallele Sessions</span>
+      <input class="num" name="maxSessions" type="number" min="1" max="10" step="1" required />
+    </label>
+    <label class="setting"><span>Standard-Läufe</span>
+      <input class="num" name="defaultLoops" type="number" min="1" max="10" step="1" required />
+    </label>
+    <label class="setting"><span>Standard-Laufzeit (Min.)</span>
+      <input class="num" name="defaultRuntimeMin" type="number" min="1" max="240" step="1" required />
+    </label>
+    <label class="setting"><span>Zeitplan-Abstand (Min.)</span>
+      <input class="num" name="minScheduleIntervalMin" type="number" min="1" max="60" step="1" required />
+    </label>
+    <button class="primary row-end" type="submit">Speichern</button>
+    <button class="row-end" type="button" id="resetSettings">Standardwerte</button>
+  </form>
+  <p class="note" id="settingsNote">
+    Die Einstellungen gelten für neue Sessions und Zeitpläne und bleiben nach dem Schließen der App erhalten.
+    Bereits laufende Sessions ändern sich nicht.
+  </p>
+
+  <script nonce="{{NONCE}}">
+    "use strict";
+
+    const TOKEN = document.querySelector('meta[name="tb-token"]').content;
+
+    const sessions = new Map(); // sessionId -> letzte Zeile (Sample oder Platzhalter)
     const summaries = new Map();
     const schedules = new Map();
 
@@ -266,30 +389,161 @@
 
     // Ab dieser Zeit ohne Updates gilt eine Zeile als "eingefroren".
     const STALE_AFTER_MS = 15000;
+    // Ein Sample jünger als das zählt für die Gesamtwerte.
+    const FRESH_MS = 5000;
 
-    // URL-Verlauf (lokal im Browser, überlebt App-Neustarts).
-    const RECENT_KEY = "tb_recent_urls";
-    const RECENT_MAX = 10;
+    // Gespeicherte URLs und Einstellungen liegen im Datenordner der App (nicht im
+    // Browser-Speicher: der gilt pro Adresse samt Port, und der Port wechselt bei jedem Start).
+    let recentUrls = [];
+    let settings = null;
 
-    const msgEl = document.getElementById("msg");
-    const totalBwEl = document.getElementById("totalBw");
-    const cpuEl = document.getElementById("cpu");
-    const ramEl = document.getElementById("ram");
-    const activeCountEl = document.getElementById("activeCount");
-    const recentUrlsEl = document.getElementById("recentUrls");
+    let maxSessions = null;
+    let browserLoad = { cpu: 0, ram: 0, ts: 0 };
 
-    const sessionsBody = document.getElementById("sessionsBody");
-    const summariesBody = document.getElementById("summariesBody");
-    const schedulesBody = document.getElementById("schedulesBody");
+    const $ = (id) => document.getElementById(id);
 
-    const chart = document.getElementById("chart");
+    const msgEl = $("msg");
+    const connEl = $("conn");
+    const totalBwEl = $("totalBw");
+    const cpuEl = $("cpu");
+    const ramEl = $("ram");
+    const activeCountEl = $("activeCount");
+    const recentUrlsEl = $("recentUrls");
+    const recentListEl = $("recentList");
+    const sessionsBody = $("sessionsBody");
+    const summariesBody = $("summariesBody");
+    const schedulesBody = $("schedulesBody");
+    const chart = $("chart");
     const ctx = chart.getContext("2d");
 
+    // ---------- Helfer ----------
+
+    function h(tag, props, ...children) {
+      const node = document.createElement(tag);
+
+      for (const [k, v] of Object.entries(props || {})) {
+        if (k === "class") node.className = v;
+        else if (k === "title") node.title = v;
+        else if (k === "onclick") node.addEventListener("click", v);
+        else node.setAttribute(k, v);
+      }
+
+      for (const c of children) {
+        if (c === null || c === undefined || c === false) continue;
+        node.append(c instanceof Node ? c : document.createTextNode(String(c)));
+      }
+
+      return node;
+    }
+
+    function num(v, digits = 2) {
+      const n = Number(v);
+      return Number.isFinite(n) ? n.toFixed(digits) : "–";
+    }
+
+    function shortId(id) {
+      return String(id).slice(0, 8);
+    }
+
+    function formatDuration(sec) {
+      const s = Math.max(0, Math.floor(Number(sec) || 0));
+      const hh = Math.floor(s / 3600);
+      const mm = Math.floor((s % 3600) / 60);
+      const ss = s % 60;
+      return `${hh}:${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
+    }
+
+    function formatStartup(ms) {
+      return ms > 0 ? (ms / 1000).toFixed(1) + " s" : "–";
+    }
+
+    function formatTime(ts) {
+      return ts ? new Date(ts).toLocaleString() : "–";
+    }
+
+    function showMsg(text, isError) {
+      msgEl.classList.toggle("danger", !!isError);
+      msgEl.textContent = text;
+    }
+
+    async function api(path, opts = {}) {
+      const headers = { "X-TB-Token": TOKEN };
+
+      if (opts.body !== undefined) headers["Content-Type"] = "application/json";
+
+      let res;
+
+      try {
+        res = await fetch(path, { ...opts, headers });
+      } catch {
+        return { ok: false, status: 0, data: { error: "Core nicht erreichbar." } };
+      }
+
+      let data = null;
+
+      try {
+        data = await res.json();
+      } catch {
+        // z. B. leere Antwort
+      }
+
+      return { ok: res.ok && data?.ok !== false, status: res.status, data: data ?? {} };
+    }
+
+    async function download(path, filename) {
+      let res;
+
+      try {
+        res = await fetch(path, { headers: { "X-TB-Token": TOKEN } });
+      } catch {
+        showMsg("Export fehlgeschlagen: Core nicht erreichbar.", true);
+        return;
+      }
+
+      if (!res.ok) {
+        showMsg(res.status === 404 ? "Noch keine Daten zum Exportieren." : `Export fehlgeschlagen (${res.status}).`, true);
+        return;
+      }
+
+      const url = URL.createObjectURL(await res.blob());
+      const a = h("a", { href: url, download: filename });
+
+      document.body.append(a);
+      a.click();
+      a.remove();
+
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    }
+
+    // ---------- WebSocket (mit Wiederverbindung statt Seiten-Reload) ----------
+
+    let ws = null;
+    let retry = 0;
+
+    function setConn(text, bad) {
+      connEl.textContent = text;
+      connEl.classList.toggle("bad", !!bad);
+    }
+
     function connectWs() {
-      ws = new WebSocket(`ws://${location.host}/ws`);
+      const proto = location.protocol === "https:" ? "wss" : "ws";
+
+      ws = new WebSocket(`${proto}://${location.host}/ws?token=${encodeURIComponent(TOKEN)}`);
+
+      ws.onopen = () => {
+        retry = 0;
+        setConn("Verbunden mit dem Core.", false);
+        loadInitial();
+      };
 
       ws.onmessage = (ev) => {
-        const msg = JSON.parse(ev.data);
+        let msg;
+
+        try {
+          msg = JSON.parse(ev.data);
+        } catch {
+          return;
+        }
 
         if (msg.type === "sample") {
           handleSample(msg.data);
@@ -299,195 +553,117 @@
         } else if (msg.type === "error") {
           handleError(msg.data);
         } else if (msg.type === "status") {
-          if (msg.data.state === "stopped") {
-            sessions.delete(msg.data.sessionId);
-            latest.delete(msg.data.sessionId);
-            renderSessions();
-          }
+          handleStatus(msg.data);
         }
       };
 
-      // Core-Neustart (z. B. nach einem App-Update): Dashboard lädt neu,
-      // damit keine eingefrorenen Alt-Rows stehen bleiben.
       ws.onclose = () => {
-        msgEl.classList.add("danger");
-        msgEl.textContent = "Verbindung zum Core verloren – Dashboard wird neu geladen...";
-        setTimeout(() => location.reload(), 2000);
+        const wait = Math.min(15000, 1000 * 2 ** retry++);
+        setConn(`Verbindung zum Core getrennt – neuer Versuch in ${Math.round(wait / 1000)} s…`, true);
+        setTimeout(connectWs, wait);
+      };
+
+      ws.onerror = () => {
+        try { ws.close(); } catch {}
       };
     }
 
-    connectWs();
+    // ---------- Ereignisse ----------
 
-    document.getElementById("sessionForm").onsubmit = async (e) => {
-      e.preventDefault();
-
-      const fd = new FormData(e.currentTarget);
-      const minutes = fd.get("minutes");
-
-      const body = {
-        url: fd.get("url"),
-        kind: fd.get("kind"),
-        quality: fd.get("quality"),
-        humanize: fd.get("humanize") === "on",
-        repeat: fd.get("repeat") === "on",
-        maxRuntimeSec: minutes ? Number(minutes) * 60 : undefined,
-      };
-
-      const r = await fetch(API + "/api/sessions", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
-      });
-
-      const j = await r.json();
-      msgEl.classList.toggle("danger", !j.ok);
-      msgEl.textContent = j.ok
-        ? `Session gestartet: ${j.id} (${j.kind})`
-        : `Fehler: ${j.error}`;
-
-      if (j.ok) {
-        addRecentUrl(String(fd.get("url") ?? "").trim());
-        sessions.set(j.id, { sessionId: j.id, state: "starting" });
-        renderSessions();
+    function handleStatus(data) {
+      if (data.state === "stopped") {
+        sessions.delete(data.sessionId);
+      } else if (!sessions.has(data.sessionId)) {
+        sessions.set(data.sessionId, { sessionId: data.sessionId, state: data.state, ts: Date.now() });
       }
-    };
 
-    document.getElementById("scheduleForm").onsubmit = async (e) => {
-      e.preventDefault();
-
-      const fd = new FormData(e.currentTarget);
-      const minutes = fd.get("minutes");
-
-      const body = {
-        cron: fd.get("cron"),
-        enabled: true,
-        session: {
-          url: fd.get("url"),
-          quality: fd.get("quality"),
-          humanize: fd.get("humanize") === "on",
-          repeat: fd.get("repeat") === "on",
-          maxRuntimeSec: minutes ? Number(minutes) * 60 : undefined,
-        },
-      };
-
-      const r = await fetch(API + "/api/schedules", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
-      });
-
-      const j = await r.json();
-      msgEl.classList.toggle("danger", !j.ok);
-      msgEl.textContent = j.ok
-        ? `Schedule hinzugefügt: ${j.schedule.id}`
-        : `Fehler: ${j.error}`;
-
-      if (j.ok) {
-        schedules.set(j.schedule.id, j.schedule);
-        renderSchedules();
-      }
-    };
-
-    // ---------- URL-Verlauf ----------
-
-    function getRecentUrls() {
-      try {
-        const v = JSON.parse(localStorage.getItem(RECENT_KEY) ?? "[]");
-        return Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
-      } catch {
-        return [];
-      }
+      renderSessions();
+      updateStats();
     }
-
-    function renderRecentUrls() {
-      const list = getRecentUrls();
-
-      recentUrlsEl.innerHTML =
-        '<option value="">Letzte URLs…</option>' +
-        list
-          .map(
-            (u) =>
-              `<option value="${escapeHtml(u)}">${escapeHtml(
-                u.length > 70 ? u.slice(0, 67) + "…" : u
-              )}</option>`
-          )
-          .join("");
-
-      recentUrlsEl.value = "";
-    }
-
-    function addRecentUrl(url) {
-      if (!url) return;
-
-      const list = [url, ...getRecentUrls().filter((x) => x !== url)];
-
-      try {
-        localStorage.setItem(RECENT_KEY, JSON.stringify(list.slice(0, RECENT_MAX)));
-      } catch {}
-
-      renderRecentUrls();
-    }
-
-    recentUrlsEl.onchange = () => {
-      if (recentUrlsEl.value) {
-        document.querySelector('#sessionForm input[name="url"]').value =
-          recentUrlsEl.value;
-      }
-    };
-
-    // ---------- Fehler + Samples ----------
 
     function handleError(data) {
       const { sessionId, message } = data ?? {};
 
       if (sessionId && sessions.has(sessionId)) {
-        const prev = sessions.get(sessionId);
         sessions.set(sessionId, {
-          ...prev,
+          ...sessions.get(sessionId),
           state: "error",
           note: message,
+          ts: Date.now(),
         });
         renderSessions();
       }
 
-      msgEl.classList.add("danger");
-      msgEl.textContent =
-        `Fehler ${sessionId ? shortId(sessionId) : "?"}: ${message ?? "unbekannt"}`;
+      showMsg(`Fehler ${sessionId ? shortId(sessionId) : "?"}: ${message ?? "unbekannt"}`, true);
     }
 
     function handleSample(s) {
-      latest.set(s.sessionId, s);
       sessions.set(s.sessionId, s);
 
-      const totalBw = [...latest.values()].reduce((sum, x) => sum + x.bandwidthMBps, 0);
-      const last = [...latest.values()].at(-1);
+      // CPU/RAM gelten für den ganzen Browser (alle Sessions) – der neueste Wert genügt.
+      if (s.ts >= browserLoad.ts) {
+        browserLoad = { cpu: s.cpuPercent, ram: s.ramMb, ts: s.ts };
+      }
 
-      totalBwEl.textContent = totalBw.toFixed(2) + " MB/s";
-      cpuEl.textContent = (last?.cpuPercent ?? 0).toFixed(1) + " %";
-      ramEl.textContent = (last?.ramMb ?? 0).toFixed(0) + " MB";
-      activeCountEl.textContent = String(latest.size);
+      renderSessions();
+      updateStats();
+    }
 
-      history.push(totalBw);
+    function freshSessions() {
+      const now = Date.now();
+      return [...sessions.values()].filter((s) => !s.ts || now - s.ts < FRESH_MS);
+    }
+
+    function updateStats() {
+      const live = freshSessions();
+      const bw = live.reduce((sum, s) => sum + (Number(s.bandwidthMBps) || 0), 0);
+      const idle = sessions.size === 0;
+
+      totalBwEl.textContent = num(bw) + " MB/s";
+      cpuEl.textContent = (idle ? 0 : browserLoad.cpu).toFixed(1) + " %";
+      ramEl.textContent = (idle ? 0 : browserLoad.ram).toFixed(0) + " MB";
+      activeCountEl.textContent = maxSessions ? `${sessions.size} / ${maxSessions}` : String(sessions.size);
+    }
+
+    // Ein Messpunkt pro Sekunde für das Diagramm.
+    setInterval(() => {
+      const bw = freshSessions().reduce((sum, s) => sum + (Number(s.bandwidthMBps) || 0), 0);
+
+      history.push(bw);
       if (history.length > MAX_HISTORY) history.shift();
 
       drawChart();
-      renderSessions();
-    }
+      updateStats();
+    }, 1000);
+
+    // ---------- Diagramm ----------
 
     function drawChart() {
-      ctx.clearRect(0, 0, chart.width, chart.height);
+      const dpr = window.devicePixelRatio || 1;
+      const rect = chart.getBoundingClientRect();
+      const w = Math.max(1, Math.round(rect.width * dpr));
+      const hgt = Math.max(1, Math.round(rect.height * dpr));
+
+      if (chart.width !== w || chart.height !== hgt) {
+        chart.width = w;
+        chart.height = hgt;
+      }
+
+      ctx.clearRect(0, 0, w, hgt);
 
       if (history.length < 2) return;
 
       const max = Math.max(1, ...history);
+      const pad = 8 * dpr;
 
       ctx.strokeStyle = "#4af";
-      ctx.lineWidth = 2;
+      ctx.lineWidth = 2 * dpr;
       ctx.beginPath();
 
       history.forEach((v, i) => {
-        const x = (i / (history.length - 1)) * chart.width;
-        const y = chart.height - (v / max) * (chart.height - 12) - 6;
+        // Neuester Wert rechts, ältere Werte laufen nach links heraus.
+        const x = w - ((history.length - 1 - i) / (MAX_HISTORY - 1)) * w;
+        const y = hgt - (v / max) * (hgt - 2 * pad) - pad;
 
         if (i === 0) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
@@ -496,154 +672,491 @@
       ctx.stroke();
 
       ctx.fillStyle = "#aaa";
-      ctx.font = "12px system-ui";
-      ctx.fillText(`max ${max.toFixed(2)} MB/s`, 8, 16);
+      ctx.font = `${12 * dpr}px system-ui`;
+      ctx.fillText(`max ${max.toFixed(2)} MB/s · letzte ${Math.round(MAX_HISTORY / 60)} Minuten`, 8 * dpr, 16 * dpr);
+    }
+
+    // ---------- Tabellen ----------
+
+    function emptyRow(tbody, cols, text) {
+      tbody.replaceChildren(h("tr", {}, h("td", { colspan: String(cols), class: "empty" }, text)));
     }
 
     function renderSessions() {
-      sessionsBody.innerHTML = "";
+      if (sessions.size === 0) {
+        emptyRow(sessionsBody, 10, "Keine aktive Session.");
+        return;
+      }
+
+      const rows = [];
 
       for (const s of sessions.values()) {
         const stale = !!s.ts && Date.now() - s.ts > STALE_AFTER_MS;
-        const badState = ["error", "blocked", "no_video", "not_playing"].includes(
-          s.state
+        const bad = ["error", "blocked", "no_video", "not_playing"].includes(s.state);
+
+        rows.push(
+          h(
+            "tr",
+            {},
+            h("td", { title: s.sessionId }, shortId(s.sessionId)),
+            h("td", {}, s.kind ?? ""),
+            h("td", { class: bad ? "danger" : "" }, s.state ?? "", stale ? h("span", { class: "muted" }, " (keine Updates)") : null),
+            h("td", {}, s.quality ?? ""),
+            h("td", { class: "num-cell" }, num(s.bandwidthMBps)),
+            h("td", { class: "num-cell" }, num(s.bufferedSec, 1) + " s"),
+            h("td", { class: "num-cell" }, `${s.stalls ?? 0} (${num(s.stallSec, 1)} s)`),
+            h("td", { class: "num-cell" }, formatStartup(s.startupMs)),
+            h("td", { class: "muted" }, s.note ?? ""),
+            h("td", {}, h("button", { type: "button", onclick: () => stopSession(s.sessionId) }, "Stop"))
+          )
         );
-
-        const tr = document.createElement("tr");
-
-        tr.innerHTML = `
-          <td title="${escapeHtml(s.sessionId)}">${escapeHtml(shortId(s.sessionId))}</td>
-          <td>${escapeHtml(s.kind ?? "")}</td>
-          <td class="${badState ? "danger" : ""}">${escapeHtml(s.state ?? "")}${stale ? ' <span class="muted">(keine Updates)</span>' : ""}</td>
-          <td>${escapeHtml(s.quality ?? "")}</td>
-          <td>${(s.bandwidthMBps ?? 0).toFixed(2)}</td>
-          <td>${(s.bufferedSec ?? 0).toFixed(1)}s</td>
-          <td>${s.stalls ?? 0}</td>
-          <td class="muted">${escapeHtml(s.note ?? "")}</td>
-          <td><button data-stop="${escapeHtml(s.sessionId)}">Stop</button></td>
-        `;
-
-        sessionsBody.appendChild(tr);
       }
 
-      sessionsBody.querySelectorAll("button[data-stop]").forEach((btn) => {
-        btn.onclick = () => stopSession(btn.getAttribute("data-stop"));
-      });
+      sessionsBody.replaceChildren(...rows);
+    }
+
+    // ---------- Interaktionsskript ----------
+
+    // Feste Vorlagen (kein Zufall): derselbe Text ergibt bei jedem Lauf dieselbe Abfolge.
+    const SCRIPT_PRESETS = {
+      seek: ["Vor- und Zurückspulen", "20 seek +30\n40 seek -15\n60 seek +60\n80 seek -30"],
+      pause: ["Pausen unterschiedlicher Länge", "20 pause 5\n40 pause 10\n70 pause 20"],
+      mixed: [
+        "Gemischter Ablauf (Pause, Spulen, Videowechsel)",
+        "20 pause 5\n40 seek +30\n60 seek -15\n80 next\n100 previous\n120 pause 10",
+      ],
+      navigation: ["Videowechsel in Playlist oder Kanal", "30 next\n60 next\n90 previous"],
+    };
+
+    function setupScriptBoxes() {
+      for (const box of document.querySelectorAll("details.ia")) {
+        const preset = box.querySelector("select.preset");
+        const area = box.querySelector("textarea.script");
+
+        preset.replaceChildren(
+          h("option", { value: "" }, "Vorlage wählen…"),
+          ...Object.entries(SCRIPT_PRESETS).map(([key, [label]]) => h("option", { value: key }, label))
+        );
+
+        preset.addEventListener("change", () => {
+          const p = SCRIPT_PRESETS[preset.value];
+
+          if (p) area.value = p[1];
+        });
+
+        box.querySelector("button.clearScript").addEventListener("click", () => {
+          area.value = "";
+          preset.value = "";
+        });
+      }
+    }
+
+    const ACTION_TEXT = { pause: "Pause", seek: "Sprung", next: "nächstes Video", previous: "vorheriges Video" };
+
+    function stepText(x) {
+      const t = `${Math.floor(x.at / 60)}:${String(x.at % 60).padStart(2, "0")}`;
+      let a = ACTION_TEXT[x.action] ?? x.action;
+
+      if (x.action === "pause") a += ` ${x.value} s`;
+      if (x.action === "seek") a += ` ${x.value > 0 ? "+" : ""}${x.value} s`;
+
+      const r = x.status === "ok" ? `${x.recoveryMs} ms` : x.status === "skipped" ? "übersprungen" : "fehlgeschlagen";
+
+      return `Lauf ${x.loop} · ${t} ${a} → ${r}${x.note ? " (" + x.note + ")" : ""}`;
+    }
+
+    function interactionCell(s) {
+      const list = Array.isArray(s.interactions) ? s.interactions : [];
+
+      if (list.length === 0) return h("td", { class: "muted" }, "–");
+
+      const ok = list.filter((x) => x.status === "ok");
+      const failed = list.filter((x) => x.status === "failed").length;
+      const skipped = list.filter((x) => x.status === "skipped").length;
+      const avg = ok.length ? Math.round(ok.reduce((a, x) => a + x.recoveryMs, 0) / ok.length) : null;
+
+      const text =
+        `${ok.length}/${list.length} ok` +
+        (failed ? ` · ${failed} fehlgeschlagen` : "") +
+        (skipped ? ` · ${skipped} übersprungen` : "") +
+        (avg !== null ? ` · Ø ${avg} ms` : "");
+
+      return h("td", { class: failed ? "danger" : "", title: list.map(stepText).join("\n") }, text);
     }
 
     function renderSummaries() {
-      summariesBody.innerHTML = "";
+      const list = [...summaries.values()].sort((a, b) => b.finishedAt - a.finishedAt);
 
-      for (const s of [...summaries.values()].reverse()) {
-        const tr = document.createElement("tr");
-
-        tr.innerHTML = `
-          <td title="${escapeHtml(s.sessionId)}">${escapeHtml(shortId(s.sessionId))}</td>
-          <td>${formatDuration(s.runtimeSec)}</td>
-          <td>${s.avgBandwidthMBps.toFixed(2)}</td>
-          <td>${s.peakBandwidthMBps.toFixed(2)}</td>
-          <td>${s.p95BandwidthMBps.toFixed(2)}</td>
-          <td>${s.stalls}</td>
-          <td>${s.stallSeconds.toFixed(1)}</td>
-          <td>${escapeHtml(s.dominantQuality)}</td>
-          <td>${(s.droppedFrameRatio * 100).toFixed(2)}%</td>
-        `;
-
-        summariesBody.appendChild(tr);
+      if (list.length === 0) {
+        emptyRow(summariesBody, 14, "Noch keine abgeschlossene Session.");
+        return;
       }
+
+      summariesBody.replaceChildren(
+        ...list.map((s) =>
+          h(
+            "tr",
+            {},
+            h("td", { title: s.sessionId }, shortId(s.sessionId)),
+            h("td", { class: "num-cell" }, formatDuration(s.runtimeSec)),
+            h("td", { class: "num-cell" }, num(s.avgBandwidthMBps)),
+            h("td", { class: "num-cell" }, num(s.peakBandwidthMBps)),
+            h("td", { class: "num-cell" }, num(s.p95BandwidthMBps)),
+            h("td", { class: "num-cell" }, s.stalls),
+            h("td", { class: "num-cell" }, num(s.stallSeconds, 1)),
+            h("td", { class: "num-cell" }, num((s.rebufferRatio ?? 0) * 100, 2) + " %"),
+            h("td", { class: "num-cell" }, formatStartup(s.startupMs)),
+            h("td", {}, s.dominantQuality),
+            h("td", { class: "num-cell" }, num((s.droppedFrameRatio ?? 0) * 100, 2) + " %"),
+            h("td", { class: ["error", "blocked"].includes(s.endReason) ? "danger" : "" }, s.endReason ?? ""),
+            interactionCell(s),
+            h("td", { class: "muted" }, s.note ?? "")
+          )
+        )
+      );
     }
 
     function renderSchedules() {
-      schedulesBody.innerHTML = "";
+      const list = [...schedules.values()];
 
-      for (const s of schedules.values()) {
-        const tr = document.createElement("tr");
-
-        tr.innerHTML = `
-          <td>${escapeHtml(s.cron)}</td>
-          <td>${escapeHtml(s.session.url)}</td>
-          <td>${s.nextRun ? new Date(s.nextRun).toLocaleString() : "-"}</td>
-          <td>${s.lastRun ? new Date(s.lastRun).toLocaleString() : "-"}</td>
-          <td><button data-del="${escapeHtml(s.id)}">Löschen</button></td>
-        `;
-
-        schedulesBody.appendChild(tr);
+      if (list.length === 0) {
+        emptyRow(schedulesBody, 7, "Keine Zeitpläne.");
+        return;
       }
 
-      schedulesBody.querySelectorAll("button[data-del]").forEach((btn) => {
-        btn.onclick = () => deleteSchedule(btn.getAttribute("data-del"));
-      });
+      schedulesBody.replaceChildren(
+        ...list.map((s) =>
+          h(
+            "tr",
+            {},
+            h("td", { class: "num-cell" }, s.cron),
+            h("td", { class: "url-cell" }, s.session.url),
+            h("td", { class: s.enabled ? "ok" : "muted" }, s.enabled ? "aktiv" : "pausiert"),
+            h("td", { class: "num-cell" }, s.enabled ? formatTime(s.nextRun) : "–"),
+            h("td", { class: "num-cell" }, formatTime(s.lastRun)),
+            h("td", { class: s.lastError ? "danger" : "muted" }, s.lastError ?? ""),
+            h(
+              "td",
+              {},
+              h("button", { type: "button", onclick: () => toggleSchedule(s) }, s.enabled ? "Pausieren" : "Aktivieren"),
+              h("button", { type: "button", onclick: () => deleteSchedule(s.id) }, "Löschen")
+            )
+          )
+        )
+      );
     }
 
+    // ---------- Aktionen ----------
+
+    function sessionBody(fd) {
+      const body = {
+        url: String(fd.get("url") ?? "").trim(),
+        quality: fd.get("quality"),
+        repeat: fd.get("repeat") === "on",
+      };
+
+      if (fd.has("kind")) body.kind = fd.get("kind");
+
+      const minutes = fd.get("minutes");
+      const loops = fd.get("loops");
+
+      if (minutes) body.maxRuntimeSec = Math.round(Number(minutes) * 60);
+      if (loops) body.maxLoops = Number(loops);
+
+      const script = String(fd.get("interactions") ?? "").trim();
+
+      if (script) body.interactions = script;
+
+      return body;
+    }
+
+    $("sessionForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+
+      const body = sessionBody(new FormData(e.currentTarget));
+      const r = await api("/api/sessions", { method: "POST", body: JSON.stringify(body) });
+
+      // Die URL wird vom Core vor dem Start gespeichert – auch wenn der Start scheitert.
+      loadRecentUrls();
+
+      if (!r.ok) {
+        showMsg(`Fehler: ${r.data.error ?? "Start fehlgeschlagen (" + r.status + ")"}`, true);
+        return;
+      }
+
+      showMsg(`Session gestartet: ${shortId(r.data.id)} (${r.data.kind})`, false);
+
+      sessions.set(r.data.id, { sessionId: r.data.id, state: "starting", kind: r.data.kind, ts: Date.now() });
+      renderSessions();
+      updateStats();
+    });
+
+    $("scheduleForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+
+      const fd = new FormData(e.currentTarget);
+      const body = { cron: String(fd.get("cron") ?? "").trim(), enabled: true, session: sessionBody(fd) };
+
+      const r = await api("/api/schedules", { method: "POST", body: JSON.stringify(body) });
+
+      loadRecentUrls();
+
+      if (!r.ok) {
+        showMsg(`Fehler: ${r.data.error ?? "Zeitplan konnte nicht angelegt werden (" + r.status + ")"}`, true);
+        return;
+      }
+
+      showMsg("Zeitplan hinzugefügt.", false);
+      schedules.set(r.data.schedule.id, r.data.schedule);
+      renderSchedules();
+    });
+
+    $("exportSamples").addEventListener("click", () => download("/export/samples.csv", "tubeload-samples.csv"));
+    $("exportSummaries").addEventListener("click", () => download("/export/summaries.csv", "tubeload-summaries.csv"));
+    $("exportInteractions").addEventListener("click", () => download("/export/interactions.csv", "tubeload-interactions.csv"));
+
+    setupScriptBoxes();
+
     async function stopSession(id) {
-      await fetch(`${API}/api/sessions/${encodeURIComponent(id)}`, {
-        method: "DELETE",
+      const r = await api(`/api/sessions/${encodeURIComponent(id)}`, { method: "DELETE" });
+
+      showMsg(r.ok ? `Session gestoppt: ${shortId(id)}` : `Stoppen fehlgeschlagen (${r.status}).`, !r.ok);
+    }
+
+    async function toggleSchedule(s) {
+      const r = await api(`/api/schedules/${encodeURIComponent(s.id)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ enabled: !s.enabled }),
       });
 
-      msgEl.classList.remove("danger");
-      msgEl.textContent = "Session gestoppt: " + id;
+      if (r.ok && r.data.schedule) {
+        schedules.set(s.id, r.data.schedule);
+        renderSchedules();
+      } else {
+        showMsg(`Änderung fehlgeschlagen: ${r.data.error ?? r.status}`, true);
+      }
     }
 
     async function deleteSchedule(id) {
-      await fetch(`${API}/api/schedules/${encodeURIComponent(id)}`, {
-        method: "DELETE",
-      });
+      const r = await api(`/api/schedules/${encodeURIComponent(id)}`, { method: "DELETE" });
 
-      schedules.delete(id);
-      renderSchedules();
-    }
-
-    async function loadInitial() {
-      try {
-        const [sumRes, schRes] = await Promise.all([
-          fetch(API + "/api/summaries"),
-          fetch(API + "/api/schedules"),
-        ]);
-
-        const sumJson = await sumRes.json();
-        const schJson = await schRes.json();
-
-        for (const s of sumJson.summaries ?? []) {
-          summaries.set(s.sessionId, s);
-        }
-
-        for (const s of schJson.schedules ?? []) {
-          schedules.set(s.id, s);
-        }
-
-        renderSummaries();
+      if (r.ok) {
+        schedules.delete(id);
         renderSchedules();
-      } catch (e) {
-        console.error(e);
+      } else {
+        showMsg(`Löschen fehlgeschlagen (${r.status}).`, true);
       }
     }
 
-    function shortId(id) {
-      return String(id).slice(0, 8);
+    // ---------- Gespeicherte URLs ----------
+
+    function renderRecentUrls() {
+      const selected = recentUrlsEl.value;
+
+      recentUrlsEl.replaceChildren(
+        h("option", { value: "" }, "Gespeicherte URLs…"),
+        ...recentUrls.map((u) => h("option", { value: u }, u.length > 70 ? u.slice(0, 67) + "…" : u))
+      );
+
+      recentUrlsEl.value = recentUrls.includes(selected) ? selected : "";
+
+      // Autovervollständigung in beiden URL-Feldern (Session und Zeitplan).
+      recentListEl.replaceChildren(...recentUrls.map((u) => h("option", { value: u })));
     }
 
-    function formatDuration(sec) {
-      const s = Math.max(0, Math.floor(sec));
-      const h = Math.floor(s / 3600);
-      const m = Math.floor((s % 3600) / 60);
-      const ss = s % 60;
-      return `${h}:${String(m).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
+    async function loadRecentUrls() {
+      const r = await api("/api/recent-urls");
+
+      if (r.ok) {
+        recentUrls = Array.isArray(r.data.urls) ? r.data.urls : [];
+        renderRecentUrls();
+      }
     }
 
-    function escapeHtml(v) {
-      return String(v ?? "")
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#039;");
+    recentUrlsEl.addEventListener("change", () => {
+      if (recentUrlsEl.value) {
+        document.querySelector('#sessionForm input[name="url"]').value = recentUrlsEl.value;
+      }
+    });
+
+    $("removeRecent").addEventListener("click", async () => {
+      const url = recentUrlsEl.value;
+
+      if (!url) {
+        showMsg("Bitte zuerst in der Liste „Gespeicherte URLs“ eine URL auswählen.", true);
+        return;
+      }
+
+      const r = await api(`/api/recent-urls?url=${encodeURIComponent(url)}`, { method: "DELETE" });
+
+      if (r.data?.urls) {
+        recentUrls = r.data.urls;
+        renderRecentUrls();
+      }
+
+      showMsg(r.ok ? "URL aus der Liste entfernt." : "URL war nicht (mehr) gespeichert.", !r.ok);
+    });
+
+    // Eine eingegebene URL wird sofort gemerkt (beim Verlassen des Feldes) – auch ohne Start.
+    // Ungültige Eingaben lehnt der Core still ab.
+    for (const input of document.querySelectorAll('input[name="url"]')) {
+      input.addEventListener("change", async () => {
+        const url = input.value.trim();
+
+        // Offensichtlich Ungültiges gar nicht erst senden (der Core prüft trotzdem selbst).
+        if (!/^https:\/\//i.test(url)) return;
+
+        const r = await api("/api/recent-urls", { method: "POST", body: JSON.stringify({ url }) });
+
+        if (r.ok && Array.isArray(r.data.urls)) {
+          recentUrls = r.data.urls;
+          renderRecentUrls();
+        }
+      });
     }
 
-    loadInitial();
-    renderRecentUrls();
+    // ---------- Einstellungen ----------
 
-    // Regelmäßig neu rendern, damit Stale-Markierungen aktuell bleiben.
+    const settingsForm = $("settingsForm");
+
+    function applySettings(payload) {
+      settings = payload.settings;
+      maxSessions = settings.maxSessions;
+
+      for (const [key, value] of Object.entries(settings)) {
+        const input = settingsForm.elements[key];
+        const bounds = payload.bounds?.[key];
+
+        if (!input) continue;
+
+        input.value = value;
+
+        if (bounds) {
+          input.min = bounds.min;
+          input.max = bounds.max;
+        }
+      }
+
+      // Platzhalter der Formulare zeigen die aktuellen Standardwerte.
+      for (const el of document.querySelectorAll('[data-ph="minutes"]')) {
+        el.placeholder = `Min. (${settings.defaultRuntimeMin})`;
+      }
+
+      for (const el of document.querySelectorAll('[data-ph="loops"]')) {
+        el.placeholder = `Läufe (${settings.defaultLoops})`;
+      }
+
+      $("minGapText").textContent = String(settings.minScheduleIntervalMin);
+
+      const b = payload.bounds;
+
+      if (b) {
+        $("settingsNote").textContent =
+          "Die Einstellungen gelten für neue Sessions und Zeitpläne und bleiben nach dem Schließen der App erhalten. " +
+          "Bereits laufende Sessions ändern sich nicht. " +
+          `Feste Obergrenzen zum Schutz des Rechners: ${b.maxSessions.max} Sessions, ` +
+          `${b.defaultLoops.max} Läufe, ${b.defaultRuntimeMin.max} Minuten Laufzeit.`;
+      }
+
+      updateStats();
+    }
+
+    async function loadSettings() {
+      const r = await api("/api/settings");
+
+      if (r.ok) applySettings(r.data);
+    }
+
+    settingsForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+
+      const body = {};
+
+      for (const key of ["maxSessions", "defaultLoops", "defaultRuntimeMin", "minScheduleIntervalMin"]) {
+        body[key] = Number(settingsForm.elements[key].value);
+      }
+
+      const r = await api("/api/settings", { method: "PUT", body: JSON.stringify(body) });
+
+      if (r.ok) {
+        applySettings(r.data);
+        showMsg("Einstellungen gespeichert.", false);
+      } else {
+        showMsg(`Einstellungen nicht gespeichert: ${r.data.error ?? r.status}`, true);
+      }
+    });
+
+    $("resetSettings").addEventListener("click", async () => {
+      const r = await api("/api/settings/reset", { method: "POST", body: "{}" });
+
+      if (r.ok) {
+        applySettings(r.data);
+        showMsg("Einstellungen auf Standardwerte zurückgesetzt.", false);
+      } else {
+        showMsg(`Zurücksetzen fehlgeschlagen: ${r.data.error ?? r.status}`, true);
+      }
+    });
+
+    // ---------- Start ----------
+
+    async function loadInitial() {
+      const [sum, sch, ses] = await Promise.all([
+        api("/api/summaries"),
+        api("/api/schedules"),
+        api("/api/sessions"),
+      ]);
+
+      if (sum.ok) {
+        summaries.clear();
+        for (const s of sum.data.summaries ?? []) summaries.set(s.sessionId, s);
+      }
+
+      if (sch.ok) {
+        schedules.clear();
+        for (const s of sch.data.schedules ?? []) schedules.set(s.id, s);
+      }
+
+      if (ses.ok) {
+        maxSessions = ses.data.max ?? null;
+
+        // Läuft nach einer Wiederverbindung noch eine Session, die wir nicht kennen?
+        for (const id of ses.data.ids ?? []) {
+          if (!sessions.has(id)) sessions.set(id, { sessionId: id, state: "starting", ts: Date.now() });
+        }
+
+        // Sessions, die inzwischen beendet sind, entfernen.
+        const alive = new Set(ses.data.ids ?? []);
+        for (const id of [...sessions.keys()]) if (!alive.has(id)) sessions.delete(id);
+      }
+
+      renderSummaries();
+      renderSchedules();
+      renderSessions();
+      updateStats();
+
+      loadRecentUrls();
+      loadSettings();
+    }
+
+    // Zeitpläne ändern sich serverseitig (Lauf/Fehler) – regelmäßig auffrischen.
+    setInterval(async () => {
+      const r = await api("/api/schedules");
+
+      if (r.ok) {
+        schedules.clear();
+        for (const s of r.data.schedules ?? []) schedules.set(s.id, s);
+        renderSchedules();
+      }
+    }, 30000);
+
+    // Stale-Markierungen aktuell halten.
     setInterval(renderSessions, 10000);
+
+    renderSessions();
+    renderSummaries();
+    renderSchedules();
+    connectWs();
+    window.addEventListener("resize", drawChart);
   </script>
 </body>
 </html>
