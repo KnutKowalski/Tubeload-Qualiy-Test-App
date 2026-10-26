@@ -11,7 +11,8 @@ import type { SessionDefaults } from "./validate";
  * Vom Nutzer einstellbare Werte. Sie gelten für neue Sessions und Zeitpläne;
  * bereits laufende Sessions bleiben unverändert. Die festen Obergrenzen
  * (SETTING_BOUNDS, abgeleitet aus LIMITS) lassen sich nicht überschreiten – sie
- * schützen den Rechner vor Überlastung.
+ * schützen den Rechner vor Überlastung. Nur die Zahl paralleler Sessions ist nach
+ * oben frei (max: null); sie richtet sich nach der Auslastung des Rechners.
  */
 export interface Settings {
   /** Gleichzeitig laufende Sessions. */
@@ -31,8 +32,14 @@ export const SETTING_KEYS = [
   "minScheduleIntervalMin",
 ] as const satisfies readonly (keyof Settings)[];
 
-export const SETTING_BOUNDS: Record<keyof Settings, { min: number; max: number }> = {
-  maxSessions: { min: 1, max: LIMITS.hardMaxSessions },
+/** max: null bedeutet "keine feste Obergrenze". */
+export interface SettingBounds {
+  min: number;
+  max: number | null;
+}
+
+export const SETTING_BOUNDS: Record<keyof Settings, SettingBounds> = {
+  maxSessions: { min: 1, max: null },
   defaultLoops: { min: 1, max: LIMITS.maxLoops },
   defaultRuntimeMin: { min: 1, max: Math.floor(LIMITS.maxRuntimeSec / 60) },
   minScheduleIntervalMin: { min: LIMITS.absoluteMinScheduleIntervalSec / 60, max: 60 },
@@ -62,12 +69,16 @@ export function sessionDefaultsFrom(s: Settings): SessionDefaults {
 function checkValue(key: keyof Settings, v: unknown): number {
   const { min, max } = SETTING_BOUNDS[key];
 
-  if (typeof v !== "number" || !Number.isFinite(v) || !Number.isInteger(v)) {
+  if (typeof v !== "number" || !Number.isFinite(v) || !Number.isSafeInteger(v)) {
     throw new ValidationError(`"${LABELS[key]}" muss eine ganze Zahl sein.`);
   }
 
-  if (v < min || v > max) {
-    throw new ValidationError(`"${LABELS[key]}" muss zwischen ${min} und ${max} liegen.`);
+  if (v < min || (max !== null && v > max)) {
+    throw new ValidationError(
+      max === null
+        ? `"${LABELS[key]}" muss mindestens ${min} sein.`
+        : `"${LABELS[key]}" muss zwischen ${min} und ${max} liegen.`
+    );
   }
 
   return v;
