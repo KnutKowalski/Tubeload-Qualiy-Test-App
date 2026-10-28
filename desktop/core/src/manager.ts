@@ -54,6 +54,7 @@ export class SessionManager extends EventEmitter {
       typeof maxSessions === "function" ? maxSessions : () => maxSessions;
   }
 
+  /** Höchstzahl gleichzeitiger Sessions; 0 = unbegrenzt. */
   get maxSessions(): number {
     return this.maxSessionsSource();
   }
@@ -95,7 +96,7 @@ export class SessionManager extends EventEmitter {
 
     const max = this.maxSessions;
 
-    if (this.runners.size >= max) {
+    if (max > 0 && this.runners.size >= max) {
       throw new ManagerError(
         "limit",
         `Maximal ${max} gleichzeitige Sessions erlaubt (änderbar unter „Einstellungen“).`

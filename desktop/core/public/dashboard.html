@@ -124,6 +124,8 @@
     .setting { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; margin: 3px 8px 3px 0; }
     .setting span { font-size: 12px; color: var(--muted); }
     .setting input { margin: 0; }
+    .setting .inline { display: flex; align-items: center; gap: 10px; }
+    .setting .check { font-size: 12px; color: var(--muted); cursor: pointer; }
     .row-end { align-self: flex-end; }
 
     .ia { flex: 1 1 100%; margin: 4px 3px; }
@@ -150,7 +152,7 @@
   <h1>TubeLoad QA</h1>
   <p class="note">
     Misst die Wiedergabequalität der eigenen Netzwerkverbindung (Bandbreite, Puffer,
-    Stalls, Auflösung, CPU/RAM). Sessions sind in Dauer, Wiederholungen und Anzahl begrenzt.
+    Stalls, Auflösung, CPU/RAM). Sessions sind in Dauer und Wiederholungen begrenzt; die Zahl paralleler Sessions stellst du selbst ein.
     Die Nutzungsbedingungen von YouTube gelten weiterhin; die App ist nicht dafür gedacht,
     Aufrufzahlen oder andere Kennzahlen zu beeinflussen.
   </p>
@@ -355,9 +357,12 @@
   <h2>Einstellungen</h2>
 
   <form id="settingsForm" class="row">
-    <label class="setting"><span>Parallele Sessions</span>
-      <input class="num" name="maxSessions" type="number" min="1" step="1" required />
-    </label>
+    <div class="setting"><span>Parallele Sessions</span>
+      <div class="inline">
+        <input class="num" name="maxSessions" type="number" min="1" step="1" required aria-label="Parallele Sessions" />
+        <label class="check"><input type="checkbox" name="maxSessionsUnlimited" /> unbegrenzt</label>
+      </div>
+    </div>
     <label class="setting"><span>Standard-Läufe</span>
       <input class="num" name="defaultLoops" type="number" min="1" max="10" step="1" required />
     </label>
@@ -397,7 +402,9 @@
     let recentUrls = [];
     let settings = null;
 
-    let maxSessions = null;
+    // undefined = noch unbekannt, null = unbegrenzt, sonst die eingestellte Zahl
+    let maxSessions;
+    let lastSessionLimit = 3;
     let browserLoad = { cpu: 0, ram: 0, ts: 0 };
 
     const $ = (id) => document.getElementById(id);
@@ -622,7 +629,8 @@
       totalBwEl.textContent = num(bw) + " MB/s";
       cpuEl.textContent = (idle ? 0 : browserLoad.cpu).toFixed(1) + " %";
       ramEl.textContent = (idle ? 0 : browserLoad.ram).toFixed(0) + " MB";
-      activeCountEl.textContent = maxSessions ? `${sessions.size} / ${maxSessions}` : String(sessions.size);
+      activeCountEl.textContent =
+        maxSessions === undefined ? String(sessions.size) : `${sessions.size} / ${maxSessions ?? "∞"}`;
     }
 
     // Ein Messpunkt pro Sekunde für das Diagramm.
@@ -1021,7 +1029,7 @@
 
     function applySettings(payload) {
       settings = payload.settings;
-      maxSessions = settings.maxSessions;
+      maxSessions = settings.maxSessions > 0 ? settings.maxSessions : null;
 
       for (const [key, value] of Object.entries(settings)) {
         const input = settingsForm.elements[key];
@@ -1029,10 +1037,12 @@
 
         if (!input) continue;
 
-        input.value = value;
+        if (key === "maxSessions") showSessionLimit(value);
+        else input.value = value;
 
         if (bounds) {
-          input.min = bounds.min;
+          // Parallele Sessions: 0 (= unbegrenzt) wird über das Kästchen gewählt, nicht im Zahlenfeld.
+          input.min = key === "maxSessions" ? Math.max(1, bounds.min) : bounds.min;
 
           // max: null = keine feste Obergrenze (parallele Sessions)
           if (bounds.max === null) input.removeAttribute("max");
@@ -1059,8 +1069,8 @@
           "Bereits laufende Sessions ändern sich nicht. " +
           `Feste Obergrenzen zum Schutz des Rechners: ${b.defaultLoops.max} Läufe, ` +
           `${b.defaultRuntimeMin.max} Minuten Laufzeit. ` +
-          "Die Zahl paralleler Sessions ist frei wählbar – jede Session startet einen eigenen " +
-          "Browser-Kontext und braucht Arbeitsspeicher und CPU; bei hohen Werten die Auslastung des Rechners beobachten.";
+          "Parallele Sessions: frei wählbar oder „unbegrenzt“ (dann gibt es keine Sperre). Jede Session startet einen " +
+          "eigenen Browser-Kontext und braucht Arbeitsspeicher und CPU; bei hohen Werten die Auslastung des Rechners beobachten.";
       }
 
       updateStats();
@@ -1072,6 +1082,27 @@
       if (r.ok) applySettings(r.data);
     }
 
+    function showSessionLimit(value) {
+      const input = settingsForm.elements.maxSessions;
+      const unlimited = value === 0;
+
+      settingsForm.elements.maxSessionsUnlimited.checked = unlimited;
+      input.disabled = unlimited;
+
+      if (!unlimited) lastSessionLimit = value;
+
+      input.value = unlimited ? "" : value;
+      input.placeholder = unlimited ? "∞" : "";
+    }
+
+    settingsForm.elements.maxSessionsUnlimited.addEventListener("change", (e) => {
+      const input = settingsForm.elements.maxSessions;
+
+      input.disabled = e.target.checked;
+      input.value = e.target.checked ? "" : lastSessionLimit;
+      input.placeholder = e.target.checked ? "∞" : "";
+    });
+
     settingsForm.addEventListener("submit", async (e) => {
       e.preventDefault();
 
@@ -1080,6 +1111,9 @@
       for (const key of ["maxSessions", "defaultLoops", "defaultRuntimeMin", "minScheduleIntervalMin"]) {
         body[key] = Number(settingsForm.elements[key].value);
       }
+
+      // Kästchen "unbegrenzt" = 0 (keine Sperre)
+      if (settingsForm.elements.maxSessionsUnlimited.checked) body.maxSessions = 0;
 
       const r = await api("/api/settings", { method: "PUT", body: JSON.stringify(body) });
 
@@ -1122,7 +1156,7 @@
       }
 
       if (ses.ok) {
-        maxSessions = ses.data.max ?? null;
+        maxSessions = ses.data.max ?? null; // null = unbegrenzt
 
         // Läuft nach einer Wiederverbindung noch eine Session, die wir nicht kennen?
         for (const id of ses.data.ids ?? []) {

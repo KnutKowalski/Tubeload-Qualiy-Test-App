@@ -108,13 +108,13 @@ test("Einstellungen: lesen liefert Werte, Standardwerte und Grenzen", async () =
   const b = JSON.parse(r.body);
 
   assert.equal(r.status, 200);
-  assert.deepEqual(b.settings, { maxSessions: 3, defaultLoops: 3, defaultRuntimeMin: 30, minScheduleIntervalMin: 5 });
+  assert.deepEqual(b.settings, { maxSessions: 0, defaultLoops: 3, defaultRuntimeMin: 30, minScheduleIntervalMin: 5 });
   assert.deepEqual(b.defaults, b.settings);
-  assert.deepEqual(b.bounds.maxSessions, { min: 1, max: null });
+  assert.deepEqual(b.bounds.maxSessions, { min: 0, max: null });
 });
 
 test("Einstellungen: ungültige Eingaben -> 400, nichts wird geändert", async () => {
-  for (const body of [{ maxSessions: 0 }, { defaultLoops: 0 }, { foo: 1 }, { maxSessions: "5" }, []]) {
+  for (const body of [{ maxSessions: -1 }, { defaultLoops: 0 }, { foo: 1 }, { maxSessions: "5" }, []]) {
     const r = await call("PUT", "/api/settings", body);
 
     assert.equal(r.status, 400, JSON.stringify(body));
@@ -122,7 +122,7 @@ test("Einstellungen: ungültige Eingaben -> 400, nichts wird geändert", async (
   }
 
   assert.equal((await request(port, { method: "PUT", path: "/api/settings", headers: json, body: "{kaputt" })).status, 400);
-  assert.equal(JSON.parse((await call("GET", "/api/settings", undefined, auth)).body).settings.maxSessions, 3);
+  assert.equal(JSON.parse((await call("GET", "/api/settings", undefined, auth)).body).settings.maxSessions, 0);
 });
 
 test("Einstellungen: parallele Sessions sind nach oben frei (z. B. 25)", async () => {
@@ -131,15 +131,18 @@ test("Einstellungen: parallele Sessions sind nach oben frei (z. B. 25)", async (
   assert.equal(r.status, 200, r.body);
   assert.equal(JSON.parse(r.body).settings.maxSessions, 25);
 
-  // wieder zurück, damit die übrigen Tests den Standardwert sehen
-  assert.equal((await call("PUT", "/api/settings", { maxSessions: 3 })).status, 200);
+  // 0 = unbegrenzt (Standard); damit sehen die übrigen Tests wieder den Ausgangswert
+  const unlimited = await call("PUT", "/api/settings", { maxSessions: 0 });
+
+  assert.equal(unlimited.status, 200);
+  assert.equal(JSON.parse(unlimited.body).settings.maxSessions, 0);
 });
 
 test("Einstellungen: fremder Origin (CSRF) wird abgelehnt", async () => {
   const r = await call("PUT", "/api/settings", { maxSessions: 9 }, { ...json, Origin: "https://evil.example" });
 
   assert.equal(r.status, 403);
-  assert.equal(JSON.parse((await call("GET", "/api/settings", undefined, auth)).body).settings.maxSessions, 3);
+  assert.equal(JSON.parse((await call("GET", "/api/settings", undefined, auth)).body).settings.maxSessions, 0);
 });
 
 test("Einstellungen wirken: Standard-Läufe/-Laufzeit und Zeitplan-Abstand, auch nach Neustart", async () => {
@@ -169,7 +172,7 @@ test("Einstellungen wirken: Standard-Läufe/-Laufzeit und Zeitplan-Abstand, auch
   await boot();
 
   assert.deepEqual(JSON.parse((await call("GET", "/api/settings", undefined, auth)).body).settings, {
-    maxSessions: 3,
+    maxSessions: 0,
     defaultLoops: 6,
     defaultRuntimeMin: 45,
     minScheduleIntervalMin: 1,
@@ -180,7 +183,7 @@ test("Einstellungen: Zurücksetzen", async () => {
   const r = await call("POST", "/api/settings/reset", {});
 
   assert.equal(r.status, 200);
-  assert.deepEqual(JSON.parse(r.body).settings, { maxSessions: 3, defaultLoops: 3, defaultRuntimeMin: 30, minScheduleIntervalMin: 5 });
+  assert.deepEqual(JSON.parse(r.body).settings, { maxSessions: 0, defaultLoops: 3, defaultRuntimeMin: 30, minScheduleIntervalMin: 5 });
 
   // der Abstand von 5 Minuten gilt wieder für neue Zeitpläne
   assert.equal((await call("POST", "/api/schedules", { cron: "*/2 * * * *", session: { url: VIDEO } })).status, 400);

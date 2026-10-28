@@ -426,7 +426,8 @@ export function startServer(deps: ServerDeps): RunningServer {
       sendJson(res, 200, {
         ids: manager.list(),
         active: manager.activeCount(),
-        max: manager.maxSessions,
+        // null = unbegrenzt
+        max: manager.maxSessions > 0 ? manager.maxSessions : null,
         ready: manager.isReady(),
       });
       return;

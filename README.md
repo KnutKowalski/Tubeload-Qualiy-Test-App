@@ -72,6 +72,10 @@ oder mit `TB_TOKEN` ein eigenes Token setzen.
   Verlassen des Feldes, beim Start und beim Anlegen eines Zeitplans, auch wenn der Start am Limit
   scheitert. Sie erscheinen als Vorschlag im Eingabefeld und in der Liste *Gespeicherte URLs*
   (*URL entfernen* löscht den gewählten Eintrag). Es werden bis zu 50 URLs gemerkt.
+- **Rechtsklick-Menü:** In Eingabefeldern (URL, Zahlen, Skripttext) öffnet ein Rechtsklick ein Menü mit
+  *Rückgängig, Wiederholen, Ausschneiden, Kopieren, Einfügen, Alles auswählen*. Auf markiertem Text
+  außerhalb von Eingabefeldern (z. B. Meldungen) gibt es *Kopieren* und *Alles auswählen*. Die
+  Tastaturkürzel (⌘/Strg + V, C, X, A, Z) funktionieren weiterhin.
 - **Einstellungen:** Im Abschnitt *Einstellungen* des Dashboards lassen sich parallele Sessions,
   Standard-Läufe, Standard-Laufzeit und der Mindestabstand der Zeitplan-Läufe ändern
   (siehe [Grenzwerte](#grenzwerte)).
@@ -146,11 +150,11 @@ Die Werte der ersten vier Zeilen lassen sich im Dashboard unter *Einstellungen* 
 für neue Sessions und Zeitpläne (laufende Sessions ändern sich nicht), werden in `settings.json`
 gespeichert und bleiben nach einem Neustart erhalten. *Zurücksetzen* stellt die Standardwerte
 wieder her. Die **festen Obergrenzen** schützen den Rechner und lassen sich nicht überschreiten;
-nur die Zahl paralleler Sessions hat keine feste Obergrenze (siehe unten).
+nur die Zahl paralleler Sessions hat keine Obergrenze und lässt sich auf „unbegrenzt“ stellen (siehe unten).
 
 | Einstellung | Standard | Einstellbar von … bis (feste Obergrenze) |
 | --- | --- | --- |
-| Parallele Sessions | 3 (Startwert per `TB_MAX_SESSIONS`) | ab 1, **keine feste Obergrenze** |
+| Parallele Sessions | unbegrenzt (Startwert per `TB_MAX_SESSIONS`) | ab 1 oder **unbegrenzt**, keine feste Obergrenze |
 | Wiederholungen („Läufe“) | 3 (nur wenn *Wiederholen* aktiv) | 1 – 10 |
 | Laufzeit pro Session | 30 min | 1 – 240 min |
 | Mindestabstand zwischen Zeitplan-Läufen | 5 min | 1 – 60 min |
@@ -158,8 +162,11 @@ nur die Zahl paralleler Sessions hat keine feste Obergrenze (siehe unten).
 | Interaktionsskript | – | 50 Schritte, mind. 2 s Abstand (Pausen zählen mit), Pause 1–120 s, Sprung ±600 s (fest) |
 | Android: Wiederholungen / Laufzeit | 3 / 30 min (Felder in der App) | 1 – 10 / 1 – 240 min |
 
-**Parallele Sessions:** Du legst die Zahl selbst fest und kannst sie je nach Auslastung jederzeit im
-Dashboard ändern (gilt für neue Starts, laufende Sessions bleiben unberührt). Jede Session ist ein
+**Parallele Sessions:** Standardmäßig gibt es keine Sperre („unbegrenzt“, Anzeige `0 / ∞`). Im
+Dashboard (*Einstellungen → Parallele Sessions*) kannst du *unbegrenzt* abhaken und eine feste Zahl
+eintragen, oder umgekehrt; je nach Auslastung jederzeit änderbar (gilt für neue Starts, laufende
+Sessions bleiben unberührt). Mit einer festen Zahl erscheint beim Überschreiten der Fehler
+„Maximal N gleichzeitige Sessions erlaubt“. Jede Session ist ein
 eigener Browser-Kontext mit Video-Wiedergabe und braucht Arbeitsspeicher und CPU; bei hohen Werten
 den Rechner beobachten. YouTube kann viele gleichzeitige Sitzungen von einer Adresse als
 Bot-Verkehr einstufen – dann meldet die Session `blocked` (es gibt keine Umgehung).
@@ -176,7 +183,7 @@ Mindestabstand später erhöht, bleiben bestehende Zeitpläne erhalten; er gilt 
 | `TB_CHROME_PATH` | Pfad zu Chrome/Chromium/Edge. |
 | `TB_HEADLESS` | `0` zeigt das Browserfenster (Fehlersuche). |
 | `TB_DATA_DIR` | Datenordner (`samples.csv`, `summaries.json`, `schedules.json`, `settings.json`, `recent-urls.json`). |
-| `TB_MAX_SESSIONS` | Startwert für parallele Sessions (ganze Zahl ab 1, keine Obergrenze); der Wert in den Einstellungen hat Vorrang, sobald er gespeichert wurde. |
+| `TB_MAX_SESSIONS` | Startwert für parallele Sessions (ganze Zahl ab 1, keine Obergrenze; `0` oder nicht gesetzt = unbegrenzt); der Wert in den Einstellungen hat Vorrang, sobald er gespeichert wurde. |
 | `TB_LOG_LEVEL` | `debug`, `info`, `warn`, `error`. |
 
 `samples.csv` wird ab einer Größe von 50 MB rotiert; Zusammenfassungen, Zeitpläne, Einstellungen und
