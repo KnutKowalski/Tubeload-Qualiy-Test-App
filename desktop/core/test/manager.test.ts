@@ -21,18 +21,33 @@ test("maxSessions: feste Zahl oder Funktion – Änderungen wirken sofort", () =
   assert.equal(m.maxSessions, 7);
 });
 
-test("Limit erreicht: Fehler nennt den aktuellen Wert und verweist auf die Einstellungen", () => {
-  // 0 erlaubte Sessions: der Start scheitert garantiert am Limit, ohne dass ein Browser läuft.
-  const m = new SessionManager(monitor, () => 0);
+// Browser, dessen Kontext nie fertig wird: gestartete Sessions bleiben "aktiv", ohne dass etwas läuft.
+const hangingBrowser = { newContext: () => new Promise(() => {}) } as unknown as Browser;
+const youtube = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
+const configFor = (i: number) => ({ ...parseSessionInput({ url: youtube }), id: `s${i}` }) as unknown as SessionConfig;
 
-  m.setBrowser({} as Browser);
+test("Limit erreicht: Fehler nennt den aktuellen Wert und verweist auf die Einstellungen", () => {
+  const m = new SessionManager(monitor, () => 1);
+
+  m.setBrowser(hangingBrowser);
+  m.start(configFor(0));
 
   assert.throws(
-    () => m.start(cfg),
+    () => m.start(configFor(1)),
     (e: unknown) =>
-      e instanceof ManagerError && e.code === "limit" && /Maximal 0 gleichzeitige Sessions/.test(e.message) && /Einstellungen/.test(e.message)
+      e instanceof ManagerError && e.code === "limit" && /Maximal 1 gleichzeitige Sessions/.test(e.message) && /Einstellungen/.test(e.message)
   );
-  assert.equal(m.activeCount(), 0);
+  assert.equal(m.activeCount(), 1);
+});
+
+test("0 = unbegrenzt: es gibt keine Sperre, auch weit über dem früheren Höchstwert von 10", () => {
+  const m = new SessionManager(monitor, () => 0);
+
+  m.setBrowser(hangingBrowser);
+
+  for (let i = 0; i < 60; i++) m.start(configFor(i));
+
+  assert.equal(m.activeCount(), 60);
 });
 
 test("ohne Browser: no_browser, vor dem Limit-Check", () => {
@@ -42,15 +57,10 @@ test("ohne Browser: no_browser, vor dem Limit-Check", () => {
 });
 
 test("Keine feste Obergrenze: so viele Sessions wie eingestellt starten, die nächste scheitert erst am eingestellten Wert", () => {
-  // Browser, dessen Kontext nie fertig wird: die Sessions bleiben "aktiv", ohne dass etwas läuft.
-  const browser = { newContext: () => new Promise(() => {}) } as unknown as Browser;
-  const url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
-  const configFor = (i: number) => ({ ...parseSessionInput({ url }), id: `s${i}` }) as unknown as SessionConfig;
-
   for (const limit of [12, 40]) {
     const m = new SessionManager(monitor, () => limit);
 
-    m.setBrowser(browser);
+    m.setBrowser(hangingBrowser);
 
     for (let i = 0; i < limit; i++) m.start(configFor(i));
 

@@ -1,9 +1,11 @@
-const { app, BrowserWindow, dialog } = require("electron");
+const { app, BrowserWindow, Menu, dialog } = require("electron");
 const { spawn } = require("node:child_process");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const net = require("node:net");
 const path = require("node:path");
+
+const { contextMenuTemplate } = require("./contextMenu");
 
 const MAX_LOG_BYTES = 20 * 1024 * 1024;
 const MAX_RESTARTS = 5;
@@ -262,6 +264,13 @@ function createWindow() {
   });
 
   wc.on("will-attach-webview", (event) => event.preventDefault());
+
+  // Rechtsklick: Einfügen, Kopieren usw. (Electron bringt kein eigenes Menü mit).
+  wc.on("context-menu", (_event, params) => {
+    const template = contextMenuTemplate(params);
+
+    if (template && win) Menu.buildFromTemplate(template).popup({ window: win });
+  });
 
   wc.session.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
 

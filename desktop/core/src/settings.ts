@@ -12,10 +12,11 @@ import type { SessionDefaults } from "./validate";
  * bereits laufende Sessions bleiben unverändert. Die festen Obergrenzen
  * (SETTING_BOUNDS, abgeleitet aus LIMITS) lassen sich nicht überschreiten – sie
  * schützen den Rechner vor Überlastung. Nur die Zahl paralleler Sessions ist nach
- * oben frei (max: null); sie richtet sich nach der Auslastung des Rechners.
+ * oben frei (max: null); sie richtet sich nach der Auslastung des Rechners, und 0
+ * bedeutet "unbegrenzt" (keine Sperre).
  */
 export interface Settings {
-  /** Gleichzeitig laufende Sessions. */
+  /** Gleichzeitig laufende Sessions; 0 = unbegrenzt. */
   maxSessions: number;
   /** Durchläufe, wenn "Wiederholen" gewählt und keine Zahl angegeben ist. */
   defaultLoops: number;
@@ -39,7 +40,7 @@ export interface SettingBounds {
 }
 
 export const SETTING_BOUNDS: Record<keyof Settings, SettingBounds> = {
-  maxSessions: { min: 1, max: null },
+  maxSessions: { min: 0, max: null },
   defaultLoops: { min: 1, max: LIMITS.maxLoops },
   defaultRuntimeMin: { min: 1, max: Math.floor(LIMITS.maxRuntimeSec / 60) },
   minScheduleIntervalMin: { min: LIMITS.absoluteMinScheduleIntervalSec / 60, max: 60 },
@@ -76,7 +77,7 @@ function checkValue(key: keyof Settings, v: unknown): number {
   if (v < min || (max !== null && v > max)) {
     throw new ValidationError(
       max === null
-        ? `"${LABELS[key]}" muss mindestens ${min} sein.`
+        ? `"${LABELS[key]}" muss mindestens ${min} sein${key === "maxSessions" ? " (0 = unbegrenzt)" : ""}.`
         : `"${LABELS[key]}" muss zwischen ${min} und ${max} liegen.`
     );
   }
