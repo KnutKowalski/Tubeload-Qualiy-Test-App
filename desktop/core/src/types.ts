@@ -78,36 +78,6 @@ export type EndReason =
   | "error"
   | "shutdown";
 
-// Füge dies oberhalb von SessionConfig ein:
-export type InteractionMode = "off" | "random" | "manual";
-
-export interface InteractionConfig {
-  mode: InteractionMode;
-  // Für Random-Modus
-  minPauseSec?: number;
-  maxPauseSec?: number;
-  minSeekSec?: number;
-  maxSeekSec?: number;
-  // Für Manual-Modus: Komma-separierte Liste, z.B. "30, -15, 10" 
-  // (30s warten, 15s zurück, 10s vor)
-  manualSequence?: string; 
-}
-
-// Erweitere SessionConfig:
-export interface SessionConfig {
-  id: string;
-  url: string;
-  kind?: UrlKind;
-  quality: QualityLabel;
-  humanize: boolean; // Bleibt für Kompatibilität
-  interaction?: InteractionConfig; // NEU: Der erweiterte Modus
-  repeat: boolean;
-  maxRuntimeSec?: number;
-  startTimeoutSec?: number;
-  mute?: boolean;
-  consentMode?: ConsentMode;
-}
-
 export interface SessionConfig {
   id: string;
   url: string;
